@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
@@ -20,7 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2, CheckCircle2,
+  Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2, CheckCircle2, PlayCircle,
 } from 'lucide-react';
 import {
   PRIORITY_LABELS, PRIORITY_COLORS,
@@ -58,6 +59,7 @@ type RoomWithMeta = Room & {
 export default function AssignmentsPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [rooms, setRooms] = useState<RoomWithMeta[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
@@ -205,10 +207,6 @@ export default function AssignmentsPage() {
     }
   };
 
-  const handleMarkCompleted = async (assignment: Assignment) => {
-    await handleStatusChange(assignment, 'completed');
-  };
-
   return (
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
@@ -324,8 +322,38 @@ export default function AssignmentsPage() {
                     {a.assigned_at ? new Date(a.assigned_at).toLocaleDateString() : '-'}
                   </TableCell>
                   <TableCell className="text-right">
+                    {isHousekeeping && (a.status === 'pending' || a.status === 'in_progress') && (
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={() => router.push(`/assignments/${a.id}`)}
+                          className="text-xs h-7"
+                        >
+                          {a.status === 'pending' ? (
+                            <>
+                              <PlayCircle className="mr-1 h-3 w-3" /> Start Cleaning
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="mr-1 h-3 w-3" /> Finish Cleaning
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                    {isHousekeeping && (a.status === 'completed' || a.status === 'cancelled') && (
+                      <span className="text-xs text-muted-foreground">No action</span>
+                    )}
                     {canManage && (
                       <div className="flex justify-end gap-1 flex-wrap">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(`/assignments/${a.id}`)}
+                          className="text-xs h-7"
+                        >
+                          View
+                        </Button>
                         {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][]).map((s) => (
                           <Button
                             key={s}
@@ -340,26 +368,6 @@ export default function AssignmentsPage() {
                           </Button>
                         ))}
                       </div>
-                    )}
-                    {isHousekeeping && a.status !== 'completed' && a.status !== 'cancelled' && (
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          disabled={updatingId === a.id}
-                          onClick={() => handleMarkCompleted(a)}
-                          className="text-xs h-7"
-                        >
-                          {updatingId === a.id ? (
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="mr-1 h-3 w-3" />
-                          )}
-                          Mark as Done
-                        </Button>
-                      </div>
-                    )}
-                    {isHousekeeping && (a.status === 'completed' || a.status === 'cancelled') && (
-                      <span className="text-xs text-muted-foreground">No action</span>
                     )}
                   </TableCell>
                 </TableRow>
