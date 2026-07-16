@@ -107,22 +107,18 @@ export default function UsersPage() {
         if (error) throw error;
         toast({ title: 'Updated', description: 'User updated successfully' });
       } else {
-        const { data, error } = await supabase.auth.admin.createUser({
-          email: form.email,
-          password: 'TempPass123!',
-          email_confirm: true,
-          user_metadata: { full_name: form.full_name, role: form.role },
-        });
-        if (error) {
-          const { error: upsertError } = await supabase.from('profiles').upsert({
+        const res = await fetch('/api/admin/create-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             email: form.email,
             full_name: form.full_name,
-            phone: form.phone || null,
+            phone: form.phone,
             role: form.role,
-            active: form.active,
-          });
-          if (upsertError) throw upsertError;
-        }
+          }),
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Failed to create user');
         toast({ title: 'Created', description: 'User created successfully' });
       }
       setDialogOpen(false);
