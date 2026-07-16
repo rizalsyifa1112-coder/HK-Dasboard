@@ -37,7 +37,7 @@ const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
     'dashboard', 'laundry', 'linen-tracking',
   ],
   housekeeping: [
-    'dashboard', 'room-status', 'assignments',
+    'dashboard', 'assignments',
   ],
 };
 
