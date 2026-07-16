@@ -18,81 +18,78 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import {
-  Search, RefreshCw, Download, Plus, Filter, Layers, Loader2, Pencil,
-} from 'lucide-react';
-import { type LinenInventory } from '@/lib/types';
+import { Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil } from 'lucide-react';
+import type { LinenItem } from '@/lib/types';
 
-const LINEN_CATEGORY_LABELS: Record<LinenInventory['category'], string> = {
-  bed_linen: 'Bed Linen',
-  bath_linen: 'Bath Linen',
-  table_linen: 'Table Linen',
-  uniform: 'Uniform',
-  other: 'Other',
+const STATUS_LABELS: Record<LinenItem['status'], string> = {
+  available: 'Available',
+  sent_to_laundry: 'Sent to Laundry',
+  returned: 'Returned',
+  lost: 'Lost',
 };
 
-const LINEN_CATEGORY_COLORS: Record<LinenInventory['category'], string> = {
-  bed_linen: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
-  bath_linen: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
-  table_linen: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
-  uniform: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30',
-  other: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
+const STATUS_COLORS: Record<LinenItem['status'], string> = {
+  available: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+  sent_to_laundry: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  returned: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+  lost: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
 };
 
 const emptyForm = {
-  item_name: '',
-  category: 'bed_linen' as LinenInventory['category'],
-  quantity_in_stock: '',
-  quantity_in_use: '',
-  quantity_dirty: '',
-  quantity_damaged: '',
-  par_level: '',
-  unit: 'pcs',
+  code: '',
+  item_type: 'BT' as LinenItem['item_type'],
+  status: 'available' as LinenItem['status'],
+  notes: '',
 };
 
 export default function LinenTrackingPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
-  const [items, setItems] = useState<LinenInventory[]>([]);
+  const [items, setItems] = useState<LinenItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<LinenInventory | null>(null);
+  const [editingItem, setEditingItem] = useState<LinenItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
 
-  const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor';
+  const canEdit = profile?.role === 'admin' || profile?.role === 'order_taker';
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('linen_inventory')
+        .from('linen_items')
         .select('*')
-        .order('item_name');
+        .order('item_type')
+        .order('code');
       if (error) throw error;
-      setItems((data as LinenInventory[]) || []);
+      setItems((data as LinenItem[]) || []);
     } catch (err) {
-      console.error('Error fetching linen inventory:', err);
+      console.error('Error fetching linen items:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const filtered = items.filter((i) => {
-    const matchSearch = i.item_name.toLowerCase().includes(search.toLowerCase());
-    const matchCategory = categoryFilter === 'all' || i.category === categoryFilter;
-    return matchSearch && matchCategory;
+    const matchSearch = i.code.toLowerCase().includes(search.toLowerCase());
+    const matchType = typeFilter === 'all' || i.item_type === typeFilter;
+    const matchStatus = statusFilter === 'all' || i.status === statusFilter;
+    return matchSearch && matchType && matchStatus;
   });
 
-  const lowStockCount = items.filter((i) => i.quantity_in_stock < i.par_level).length;
+  const btCount = items.filter((i) => i.item_type === 'BT').length;
+  const bmCount = items.filter((i) => i.item_type === 'BM').length;
+  const lostCount = items.filter((i) => i.status === 'lost').length;
+  const sentCount = items.filter((i) => i.status === 'sent_to_laundry').length;
 
   const openCreate = () => {
     setEditingItem(null);
@@ -100,51 +97,43 @@ export default function LinenTrackingPage() {
     setDialogOpen(true);
   };
 
-  const openEdit = (item: LinenInventory) => {
+  const openEdit = (item: LinenItem) => {
     setEditingItem(item);
     setForm({
-      item_name: item.item_name,
-      category: item.category,
-      quantity_in_stock: String(item.quantity_in_stock),
-      quantity_in_use: String(item.quantity_in_use),
-      quantity_dirty: String(item.quantity_dirty),
-      quantity_damaged: String(item.quantity_damaged),
-      par_level: String(item.par_level),
-      unit: item.unit,
+      code: item.code,
+      item_type: item.item_type,
+      status: item.status,
+      notes: item.notes ?? '',
     });
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
-    if (!form.item_name) {
-      toast({ title: 'Validation', description: 'Item name is required', variant: 'destructive' });
+    if (!form.code.trim()) {
+      toast({ title: 'Validation', description: 'Code is required', variant: 'destructive' });
       return;
     }
     setSaving(true);
     try {
       const payload = {
-        item_name: form.item_name,
-        category: form.category,
-        quantity_in_stock: parseInt(form.quantity_in_stock, 10) || 0,
-        quantity_in_use: parseInt(form.quantity_in_use, 10) || 0,
-        quantity_dirty: parseInt(form.quantity_dirty, 10) || 0,
-        quantity_damaged: parseInt(form.quantity_damaged, 10) || 0,
-        par_level: parseInt(form.par_level, 10) || 0,
-        unit: form.unit,
+        code: form.code.trim().toUpperCase(),
+        item_type: form.item_type,
+        status: form.status,
+        notes: form.notes || null,
+        created_by: profile?.id ?? null,
       };
       if (editingItem) {
-        const { error } = await supabase.from('linen_inventory').update(payload).eq('id', editingItem.id);
+        const { error } = await supabase.from('linen_items').update(payload).eq('id', editingItem.id);
         if (error) throw error;
-        toast({ title: 'Updated', description: 'Linen item updated successfully' });
+        toast({ title: 'Updated', description: 'Item updated successfully' });
       } else {
-        const { error } = await supabase.from('linen_inventory').insert(payload);
+        const { error } = await supabase.from('linen_items').insert(payload);
         if (error) throw error;
-        toast({ title: 'Created', description: 'Linen item created successfully' });
+        toast({ title: 'Created', description: 'Item added successfully' });
       }
       setDialogOpen(false);
       fetchData();
     } catch (err) {
-      console.error('Save error:', err);
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
       setSaving(false);
@@ -154,15 +143,12 @@ export default function LinenTrackingPage() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
-        title="Linen Tracking"
-        description="Track linen inventory levels and par levels"
+        title="BT/BM Tracking"
+        description="Track numbered Bath Towel and Bath Mat items sent to laundry vendor"
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={fetchData}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
-            </Button>
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 h-4 w-4" /> Sync Spreadsheet
             </Button>
             {canEdit && (
               <Button size="sm" onClick={openCreate}>
@@ -174,38 +160,52 @@ export default function LinenTrackingPage() {
       />
 
       {/* Summary */}
-      <div className="flex flex-wrap gap-2">
-        <Badge variant="outline" className="px-3 py-1.5 text-xs">
-          Total Items: {items.length}
-        </Badge>
-        <Badge
-          variant="outline"
-          className={cn('px-3 py-1.5 text-xs', lowStockCount > 0 && 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30')}
-        >
-          Low Stock: {lowStockCount}
-        </Badge>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Bath Towel (BT)', value: btCount, color: 'text-primary' },
+          { label: 'Bath Mat (BM)', value: bmCount, color: 'text-blue-500' },
+          { label: 'Sent to Laundry', value: sentCount, color: 'text-amber-500' },
+          { label: 'Lost', value: lostCount, color: 'text-red-500' },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">{s.label}</p>
+              <p className={cn('text-2xl font-bold mt-1', s.color)}>{s.value}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search item name..."
+            placeholder="Search code..."
             className="pl-8"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-[180px]">
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-[150px]">
             <Filter className="mr-2 h-4 w-4" />
-            <SelectValue placeholder="All Categories" />
+            <SelectValue placeholder="All Types" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {(Object.keys(LINEN_CATEGORY_LABELS) as LinenInventory['category'][]).map((c) => (
-              <SelectItem key={c} value={c}>{LINEN_CATEGORY_LABELS[c]}</SelectItem>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="BT">Bath Towel (BT)</SelectItem>
+            <SelectItem value="BM">Bath Mat (BM)</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[170px]">
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            {(Object.keys(STATUS_LABELS) as LinenItem['status'][]).map((s) => (
+              <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -214,7 +214,7 @@ export default function LinenTrackingPage() {
       {/* Table */}
       {loading ? (
         <div className="space-y-2">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="h-12 rounded bg-muted animate-pulse" />
           ))}
         </div>
@@ -222,7 +222,7 @@ export default function LinenTrackingPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Layers className="h-10 w-10 mb-2 opacity-40" />
-            <p>No linen items found matching your filters</p>
+            <p>No items found</p>
           </CardContent>
         </Card>
       ) : (
@@ -230,165 +230,107 @@ export default function LinenTrackingPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Item</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead className="text-right">In Stock</TableHead>
-                <TableHead className="text-right">In Use</TableHead>
-                <TableHead className="text-right">Dirty</TableHead>
-                <TableHead className="text-right">Damaged</TableHead>
-                <TableHead className="text-right">Par Level</TableHead>
-                <TableHead>Unit</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Notes</TableHead>
                 {canEdit && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((i) => {
-                const isLow = i.quantity_in_stock < i.par_level;
-                return (
-                  <TableRow key={i.id}>
-                    <TableCell className="font-medium">{i.item_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={cn('text-xs', LINEN_CATEGORY_COLORS[i.category])}>
-                        {LINEN_CATEGORY_LABELS[i.category]}
-                      </Badge>
+              {filtered.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell className="font-mono font-semibold">{item.code}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">
+                      {item.item_type === 'BT' ? 'Bath Towel' : 'Bath Mat'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={cn('text-xs', STATUS_COLORS[item.status])}>
+                      {STATUS_LABELS[item.status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{item.notes ?? '-'}</TableCell>
+                  {canEdit && (
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
+                        <Pencil className="mr-1 h-3 w-3" /> Edit
+                      </Button>
                     </TableCell>
-                    <TableCell className={cn('text-right font-medium', isLow && 'text-red-600 dark:text-red-400')}>
-                      {i.quantity_in_stock}
-                    </TableCell>
-                    <TableCell className="text-right">{i.quantity_in_use}</TableCell>
-                    <TableCell className="text-right">{i.quantity_dirty}</TableCell>
-                    <TableCell className="text-right">{i.quantity_damaged}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{i.par_level}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{i.unit}</TableCell>
-                    <TableCell>
-                      {isLow ? (
-                        <Badge variant="outline" className="text-xs bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30">
-                          Low Stock
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
-                          OK
-                        </Badge>
-                      )}
-                    </TableCell>
-                    {canEdit && (
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(i)}>
-                          <Pencil className="mr-1 h-3 w-3" /> Edit
-                        </Button>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })}
+                  )}
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingItem ? 'Edit Linen Item' : 'Add Linen Item'}</DialogTitle>
+            <DialogTitle>{editingItem ? 'Edit Item' : 'Add BT/BM Item'}</DialogTitle>
             <DialogDescription>
-              {editingItem ? 'Update linen inventory details' : 'Create a new linen inventory item'}
+              {editingItem ? 'Update item details' : 'Register a new numbered item'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="item_name">Item Name</Label>
-              <Input
-                id="item_name"
-                value={form.item_name}
-                onChange={(e) => setForm({ ...form, item_name: e.target.value })}
-                placeholder="King Bed Sheets"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Category</Label>
+              <Label>Item Type</Label>
               <Select
-                value={form.category}
-                onValueChange={(v) => setForm({ ...form, category: v as LinenInventory['category'] })}
+                value={form.item_type}
+                onValueChange={(v) => setForm({ ...form, item_type: v as LinenItem['item_type'], code: v })}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(LINEN_CATEGORY_LABELS) as LinenInventory['category'][]).map((c) => (
-                    <SelectItem key={c} value={c}>{LINEN_CATEGORY_LABELS[c]}</SelectItem>
+                  <SelectItem value="BT">Bath Towel (BT)</SelectItem>
+                  <SelectItem value="BM">Bath Mat (BM)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="code">Code (e.g. BT001)</Label>
+              <Input
+                id="code"
+                value={form.code}
+                onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
+                placeholder="BT001"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Status</Label>
+              <Select
+                value={form.status}
+                onValueChange={(v) => setForm({ ...form, status: v as LinenItem['status'] })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(STATUS_LABELS) as LinenItem['status'][]).map((s) => (
+                    <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="quantity_in_stock">In Stock</Label>
-                <Input
-                  id="quantity_in_stock"
-                  type="number"
-                  min={0}
-                  value={form.quantity_in_stock}
-                  onChange={(e) => setForm({ ...form, quantity_in_stock: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="quantity_in_use">In Use</Label>
-                <Input
-                  id="quantity_in_use"
-                  type="number"
-                  min={0}
-                  value={form.quantity_in_use}
-                  onChange={(e) => setForm({ ...form, quantity_in_use: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="quantity_dirty">Dirty</Label>
-                <Input
-                  id="quantity_dirty"
-                  type="number"
-                  min={0}
-                  value={form.quantity_dirty}
-                  onChange={(e) => setForm({ ...form, quantity_dirty: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="quantity_damaged">Damaged</Label>
-                <Input
-                  id="quantity_damaged"
-                  type="number"
-                  min={0}
-                  value={form.quantity_damaged}
-                  onChange={(e) => setForm({ ...form, quantity_damaged: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="par_level">Par Level</Label>
-                <Input
-                  id="par_level"
-                  type="number"
-                  min={0}
-                  value={form.par_level}
-                  onChange={(e) => setForm({ ...form, par_level: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="unit">Unit</Label>
-                <Input
-                  id="unit"
-                  value={form.unit}
-                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  placeholder="pcs"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Optional notes"
+                rows={2}
+              />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editingItem ? 'Update' : 'Create'}
+              {editingItem ? 'Update' : 'Add Item'}
             </Button>
           </DialogFooter>
         </DialogContent>
