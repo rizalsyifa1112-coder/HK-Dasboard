@@ -70,8 +70,6 @@ export default function AssignmentsPage() {
 
   // Bulk-assign table state: roomId -> selected staffId
   const [roomAssignments, setRoomAssignments] = useState<Record<string, string>>({});
-  const [roomTaskTypes, setRoomTaskTypes] = useState<Record<string, Assignment['task_type']>>({});
-  const [roomPriorities, setRoomPriorities] = useState<Record<string, Priority>>({});
   const [tableSearch, setTableSearch] = useState('');
 
   const canManage = profile?.role === 'admin' || profile?.role === 'supervisor';
@@ -122,7 +120,7 @@ export default function AssignmentsPage() {
     return matchSearch && matchStatus;
   });
 
-  // Group rooms by floor -> room type for the bulk assignment table
+  // Group rooms by floor for the bulk assignment table
   const roomsByFloor = useMemo(() => {
     const q = tableSearch.toLowerCase();
     const filteredRooms = rooms.filter((r) => {
@@ -153,8 +151,6 @@ export default function AssignmentsPage() {
 
   const openBulkDialog = () => {
     setRoomAssignments({});
-    setRoomTaskTypes({});
-    setRoomPriorities({});
     setTableSearch('');
     setDialogOpen(true);
   };
@@ -172,8 +168,8 @@ export default function AssignmentsPage() {
       const inserts = entries.map(([roomId, staffId]) => ({
         room_id: roomId,
         staff_id: staffId,
-        task_type: roomTaskTypes[roomId] ?? 'cleaning',
-        priority: roomPriorities[roomId] ?? 'normal',
+        task_type: 'cleaning' as const,
+        priority: 'normal' as const,
         status: 'pending' as const,
       }));
       const { error } = await supabase.from('assignments').insert(inserts);
@@ -376,7 +372,7 @@ export default function AssignmentsPage() {
       {/* Bulk Assignment Dialog: all rooms grouped by floor, with staff select per room */}
       {canManage && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+          <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>New Assignment</DialogTitle>
               <DialogDescription>
@@ -405,15 +401,13 @@ export default function AssignmentsPage() {
                     <TableHead>Type</TableHead>
                     <TableHead>Current Status</TableHead>
                     <TableHead>Assign To</TableHead>
-                    <TableHead>Task Type</TableHead>
-                    <TableHead>Priority</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {roomsByFloor.map(({ floor, rooms: floorRooms }) => (
                     <>
                       <TableRow key={`floor-${floor?.id ?? 'none'}`} className="bg-muted/40 hover:bg-muted/40">
-                        <TableCell colSpan={6} className="font-semibold text-xs uppercase tracking-wide py-1.5">
+                        <TableCell colSpan={4} className="font-semibold text-xs uppercase tracking-wide py-1.5">
                           {floor?.name ?? 'Unassigned Floor'}
                         </TableCell>
                       </TableRow>
@@ -438,46 +432,12 @@ export default function AssignmentsPage() {
                                 setRoomAssignments((prev) => ({ ...prev, [r.id]: v }))
                               }
                             >
-                              <SelectTrigger className="h-8 w-[160px] text-xs">
+                              <SelectTrigger className="h-8 w-[170px] text-xs">
                                 <SelectValue placeholder="Unassigned" />
                               </SelectTrigger>
                               <SelectContent>
                                 {staff.map((s) => (
                                   <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <Select
-                              value={roomTaskTypes[r.id] ?? 'cleaning'}
-                              onValueChange={(v) =>
-                                setRoomTaskTypes((prev) => ({ ...prev, [r.id]: v as Assignment['task_type'] }))
-                              }
-                            >
-                              <SelectTrigger className="h-8 w-[130px] text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(Object.keys(TASK_TYPE_LABELS) as Assignment['task_type'][]).map((t) => (
-                                  <SelectItem key={t} value={t}>{TASK_TYPE_LABELS[t]}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <Select
-                              value={roomPriorities[r.id] ?? 'normal'}
-                              onValueChange={(v) =>
-                                setRoomPriorities((prev) => ({ ...prev, [r.id]: v as Priority }))
-                              }
-                            >
-                              <SelectTrigger className="h-8 w-[110px] text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(Object.keys(PRIORITY_LABELS) as Priority[]).map((p) => (
-                                  <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
@@ -488,7 +448,7 @@ export default function AssignmentsPage() {
                   ))}
                   {roomsByFloor.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground text-sm">
                         No rooms found
                       </TableCell>
                     </TableRow>
