@@ -24,7 +24,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Download, Plus, HandCoins, Loader2,
 } from 'lucide-react';
-import { type Loan, type Profile } from '@/lib/types';
+import { type Loan, type Profile, type LoanItem } from '@/lib/types';
 
 const LOAN_STATUS_LABELS: Record<Loan['status'], string> = {
   active: 'Active',
@@ -45,6 +45,7 @@ export default function LoanManagementPage() {
   const { toast } = useToast();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
+  const [loanItems, setLoanItems] = useState<LoanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -52,26 +53,28 @@ export default function LoanManagementPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     staff_id: '',
-    item_name: '',
+    loan_item_id: '',
     quantity: '',
     notes: '',
   });
 
-  const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor';
+  const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.role === 'order_taker';
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [loanRes, staffRes] = await Promise.all([
+      const [loanRes, staffRes, loanItemRes] = await Promise.all([
         supabase
           .from('loans')
-          .select('*, staff:profiles(*)')
+          .select('*, staff:profiles(*), loan_item:loan_items(*)')
           .order('loaned_at', { ascending: false }),
         supabase.from('profiles').select('*').eq('active', true).order('full_name'),
+        supabase.from('loan_items').select('*').eq('active', true).order('name'),
       ]);
 
       setLoans((loanRes.data as Loan[]) || []);
       setStaff((staffRes.data as Profile[]) || []);
+      setLoanItems((loanItemRes.data as LoanItem[]) || []);
     } catch (err) {
       console.error('Error fetching loans:', err);
     } finally {
@@ -91,21 +94,30 @@ export default function LoanManagementPage() {
     return matchSearch;
   });
 
+  const selectedLoanItem = loanItems.find((li) => li.id === form.loan_item_id);
+  const requestedQty = parseInt(form.quantity, 10) || 1;
+  const insufficientStock = !!selectedLoanItem && requestedQty > selectedLoanItem.stock;
+
   const handleCreate = async () => {
     if (!form.staff_id) {
       toast({ title: 'Validation', description: 'Please select a staff member', variant: 'destructive' });
       return;
     }
-    if (!form.item_name) {
-      toast({ title: 'Validation', description: 'Item name is required', variant: 'destructive' });
+    if (!form.loan_item_id) {
+      toast({ title: 'Validation', description: 'Please select an item', variant: 'destructive' });
+      return;
+    }
+    if (insufficientStock) {
+      toast({ title: 'Validation', description: 'Requested quantity exceeds available stock', variant: 'destructive' });
       return;
     }
     setSaving(true);
     try {
       const { error } = await supabase.from('loans').insert({
         staff_id: form.staff_id,
-        item_name: form.item_name,
-        quantity: parseInt(form.quantity, 10) || 1,
+        loan_item_id: form.loan_item_id,
+        item_name: selectedLoanItem?.name ?? '',
+        quantity: requestedQty,
         notes: form.notes || null,
         status: 'active',
         loaned_at: new Date().toISOString(),
@@ -113,7 +125,7 @@ export default function LoanManagementPage() {
       if (error) throw error;
       toast({ title: 'Created', description: 'Loan recorded successfully' });
       setDialogOpen(false);
-      setForm({ staff_id: '', item_name: '', quantity: '', notes: '' });
+      setForm({ staff_id: '', loan_item_id: '', quantity: '', notes: '' });
       fetchData();
     } catch (err) {
       console.error('Create error:', err);
@@ -209,7 +221,14 @@ export default function LoanManagementPage() {
                 <TableRow key={l.id}>
                   <TableCell className="font-medium">{l.loan_number ?? '-'}</TableCell>
                   <TableCell>{l.staff?.full_name ?? '-'}</TableCell>
-                  <TableCell>{l.item_name}</TableCell>
+                  <TableCell>
+                    {l.item_name}
+                    {l.loan_item && (
+                      <span className="ml-1.5 text-xs text-muted-foreground">
+                        ({l.loan_item.code})
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right">{l.quantity}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={cn('text-xs', LOAN_STATUS_COLORS[l.status])}>
@@ -270,13 +289,24 @@ export default function LoanManagementPage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="item_name">Item Name</Label>
-              <Input
-                id="item_name"
-                value={form.item_name}
-                onChange={(e) => setForm({ ...form, item_name: e.target.value })}
-                placeholder="Uniform - Shirt"
-              />
+              <Label>Item</Label>
+              <Select value={form.loan_item_id} onValueChange={(v) => setForm({ ...form, loan_item_id: v })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select item" />
+                </SelectTrigger>
+                <SelectContent>
+                  {loanItems.map((li) => (
+                    <SelectItem key={li.id} value={li.id} disabled={li.stock <= 0}>
+                      {li.name} ({li.code}) — stock: {li.stock} {li.unit}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {loanItems.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No loan items found. Add items in Loan Master Data first.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="quantity">Quantity</Label>
@@ -284,10 +314,16 @@ export default function LoanManagementPage() {
                 id="quantity"
                 type="number"
                 min={1}
+                max={selectedLoanItem?.stock}
                 value={form.quantity}
                 onChange={(e) => setForm({ ...form, quantity: e.target.value })}
                 placeholder="1"
               />
+              {insufficientStock && (
+                <p className="text-xs text-destructive">
+                  Only {selectedLoanItem?.stock} {selectedLoanItem?.unit} available.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
@@ -302,7 +338,7 @@ export default function LoanManagementPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving}>
+            <Button onClick={handleCreate} disabled={saving || insufficientStock}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create
             </Button>
