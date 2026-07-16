@@ -202,6 +202,7 @@ export interface Loan {
   loan_number: string;
   staff_id: string | null;
   loan_item_id: string | null;
+  room_id: string | null;
   item_name: string;
   quantity: number;
   status: 'active' | 'returned' | 'lost' | 'damaged';
@@ -212,6 +213,7 @@ export interface Loan {
   updated_at: string;
   staff?: Profile | null;
   loan_item?: LoanItem | null;
+  room?: Room | null;
 }
 
 export interface ActivityLog {
