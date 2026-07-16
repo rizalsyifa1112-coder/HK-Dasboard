@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
@@ -24,13 +24,13 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Download, Plus, HandCoins, Loader2,
 } from 'lucide-react';
-import { type Loan, type Profile, type LoanItem } from '@/lib/types';
+import { type Loan, type Profile, type LoanItem, type Room } from '@/lib/types';
 
 const LOAN_STATUS_LABELS: Record<Loan['status'], string> = {
-  active: 'Active',
-  returned: 'Returned',
-  lost: 'Lost',
-  damaged: 'Damaged',
+  active: 'Dipinjam',
+  returned: 'Dikembalikan',
+  lost: 'Hilang',
+  damaged: 'Rusak',
 };
 
 const LOAN_STATUS_COLORS: Record<Loan['status'], string> = {
@@ -40,20 +40,34 @@ const LOAN_STATUS_COLORS: Record<Loan['status'], string> = {
   damaged: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
 };
 
+function formatDateTime(value: string | null): string {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function LoanManagementPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
   const [loanItems, setLoanItems] = useState<LoanItem[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [roomInput, setRoomInput] = useState('');
   const [form, setForm] = useState({
     staff_id: '',
     loan_item_id: '',
+    room_id: '',
     quantity: '',
     notes: '',
   });
@@ -63,18 +77,20 @@ export default function LoanManagementPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [loanRes, staffRes, loanItemRes] = await Promise.all([
+      const [loanRes, staffRes, loanItemRes, roomRes] = await Promise.all([
         supabase
           .from('loans')
-          .select('*, staff:profiles(*), loan_item:loan_items(*)')
+          .select('*, staff:profiles(*), loan_item:loan_items(*), room:rooms(*)')
           .order('loaned_at', { ascending: false }),
         supabase.from('profiles').select('*').eq('active', true).order('full_name'),
         supabase.from('loan_items').select('*').eq('active', true).order('name'),
+        supabase.from('rooms').select('*').order('number'),
       ]);
 
       setLoans((loanRes.data as Loan[]) || []);
       setStaff((staffRes.data as Profile[]) || []);
       setLoanItems((loanItemRes.data as LoanItem[]) || []);
+      setRooms((roomRes.data as Room[]) || []);
     } catch (err) {
       console.error('Error fetching loans:', err);
     } finally {
@@ -90,7 +106,8 @@ export default function LoanManagementPage() {
     const matchSearch =
       (l.loan_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
       l.item_name.toLowerCase().includes(search.toLowerCase()) ||
-      (l.staff?.full_name ?? '').toLowerCase().includes(search.toLowerCase());
+      (l.staff?.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (l.room?.number ?? '').toLowerCase().includes(search.toLowerCase());
     return matchSearch;
   });
 
@@ -98,17 +115,39 @@ export default function LoanManagementPage() {
   const requestedQty = parseInt(form.quantity, 10) || 1;
   const insufficientStock = !!selectedLoanItem && requestedQty > selectedLoanItem.stock;
 
+  // Cari kamar yang cocok persis dengan nomor yang diketik
+  const matchedRoom = useMemo(
+    () => rooms.find((r) => r.number.toLowerCase() === roomInput.trim().toLowerCase()),
+    [rooms, roomInput]
+  );
+  const roomNotFound = roomInput.trim().length > 0 && !matchedRoom;
+
+  const handleRoomInputChange = (value: string) => {
+    setRoomInput(value);
+    const match = rooms.find((r) => r.number.toLowerCase() === value.trim().toLowerCase());
+    setForm((f) => ({ ...f, room_id: match ? match.id : '' }));
+  };
+
+  const resetForm = () => {
+    setForm({ staff_id: '', loan_item_id: '', room_id: '', quantity: '', notes: '' });
+    setRoomInput('');
+  };
+
   const handleCreate = async () => {
     if (!form.staff_id) {
-      toast({ title: 'Validation', description: 'Please select a staff member', variant: 'destructive' });
+      toast({ title: 'Validasi', description: 'Pilih staff yang meminjamkan', variant: 'destructive' });
       return;
     }
     if (!form.loan_item_id) {
-      toast({ title: 'Validation', description: 'Please select an item', variant: 'destructive' });
+      toast({ title: 'Validasi', description: 'Pilih barang yang dipinjam', variant: 'destructive' });
+      return;
+    }
+    if (roomInput.trim() && !matchedRoom) {
+      toast({ title: 'Validasi', description: 'Nomor kamar tidak ditemukan di data kamar', variant: 'destructive' });
       return;
     }
     if (insufficientStock) {
-      toast({ title: 'Validation', description: 'Requested quantity exceeds available stock', variant: 'destructive' });
+      toast({ title: 'Validasi', description: 'Jumlah melebihi stok yang tersedia', variant: 'destructive' });
       return;
     }
     setSaving(true);
@@ -116,6 +155,7 @@ export default function LoanManagementPage() {
       const { error } = await supabase.from('loans').insert({
         staff_id: form.staff_id,
         loan_item_id: form.loan_item_id,
+        room_id: form.room_id || null,
         item_name: selectedLoanItem?.name ?? '',
         quantity: requestedQty,
         notes: form.notes || null,
@@ -123,9 +163,9 @@ export default function LoanManagementPage() {
         loaned_at: new Date().toISOString(),
       });
       if (error) throw error;
-      toast({ title: 'Created', description: 'Loan recorded successfully' });
+      toast({ title: 'Berhasil', description: 'Barang dicatat sebagai dipinjam' });
       setDialogOpen(false);
-      setForm({ staff_id: '', loan_item_id: '', quantity: '', notes: '' });
+      resetForm();
       fetchData();
     } catch (err) {
       console.error('Create error:', err);
@@ -144,7 +184,10 @@ export default function LoanManagementPage() {
       }
       const { error } = await supabase.from('loans').update(updates).eq('id', loan.id);
       if (error) throw error;
-      toast({ title: 'Updated', description: 'Loan status updated' });
+      toast({
+        title: 'Berhasil',
+        description: newStatus === 'returned' ? 'Barang dicatat sudah dikembalikan' : 'Status peminjaman diperbarui',
+      });
       fetchData();
     } catch (err) {
       console.error('Update error:', err);
@@ -180,7 +223,7 @@ export default function LoanManagementPage() {
       <div className="relative max-w-xs">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search loan #, item, or staff..."
+          placeholder="Cari loan #, barang, staff, atau kamar..."
           className="pl-8"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -208,11 +251,12 @@ export default function LoanManagementPage() {
               <TableRow>
                 <TableHead>Loan #</TableHead>
                 <TableHead>Staff</TableHead>
+                <TableHead>Kamar</TableHead>
                 <TableHead>Item</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Loaned</TableHead>
-                <TableHead>Returned</TableHead>
+                <TableHead>Dipinjam</TableHead>
+                <TableHead>Dikembalikan</TableHead>
                 {canEdit && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
@@ -221,6 +265,15 @@ export default function LoanManagementPage() {
                 <TableRow key={l.id}>
                   <TableCell className="font-medium">{l.loan_number ?? '-'}</TableCell>
                   <TableCell>{l.staff?.full_name ?? '-'}</TableCell>
+                  <TableCell>
+                    {l.room?.number ? (
+                      <Badge variant="outline" className="text-xs">
+                        {l.room.number}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">-</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {l.item_name}
                     {l.loan_item && (
@@ -235,11 +288,11 @@ export default function LoanManagementPage() {
                       {LOAN_STATUS_LABELS[l.status]}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {l.loaned_at ? new Date(l.loaned_at).toLocaleDateString() : '-'}
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    {formatDateTime(l.loaned_at)}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {l.returned_at ? new Date(l.returned_at).toLocaleDateString() : '-'}
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    {formatDateTime(l.returned_at)}
                   </TableCell>
                   {canEdit && (
                     <TableCell className="text-right">
@@ -268,18 +321,24 @@ export default function LoanManagementPage() {
       )}
 
       {/* Create Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetForm();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Loan</DialogTitle>
-            <DialogDescription>Record an item loaned to a staff member</DialogDescription>
+            <DialogDescription>Catat barang yang dipinjamkan ke kamar tamu</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Staff Member</Label>
               <Select value={form.staff_id} onValueChange={(v) => setForm({ ...form, staff_id: v })}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select staff" />
+                  <SelectValue placeholder="Pilih staff" />
                 </SelectTrigger>
                 <SelectContent>
                   {staff.map((s) => (
@@ -288,11 +347,34 @@ export default function LoanManagementPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="room_number">Nomor Kamar</Label>
+              <Input
+                id="room_number"
+                list="room-options"
+                value={roomInput}
+                onChange={(e) => handleRoomInputChange(e.target.value)}
+                placeholder="Ketik nomor kamar, misal 204"
+                className={cn(roomNotFound && 'border-destructive focus-visible:ring-destructive')}
+              />
+              <datalist id="room-options">
+                {rooms.map((r) => (
+                  <option key={r.id} value={r.number} />
+                ))}
+              </datalist>
+              {roomNotFound && (
+                <p className="text-xs text-destructive">
+                  Nomor kamar tidak ditemukan. Cek kembali daftar kamar.
+                </p>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <Label>Item</Label>
               <Select value={form.loan_item_id} onValueChange={(v) => setForm({ ...form, loan_item_id: v })}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select item" />
+                  <SelectValue placeholder="Pilih barang" />
                 </SelectTrigger>
                 <SelectContent>
                   {loanItems.map((li) => (
@@ -304,10 +386,11 @@ export default function LoanManagementPage() {
               </Select>
               {loanItems.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  No loan items found. Add items in Loan Master Data first.
+                  Belum ada data barang. Tambahkan dulu di Loan Master Data.
                 </p>
               )}
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="quantity">Quantity</Label>
               <Input
@@ -321,17 +404,18 @@ export default function LoanManagementPage() {
               />
               {insufficientStock && (
                 <p className="text-xs text-destructive">
-                  Only {selectedLoanItem?.stock} {selectedLoanItem?.unit} available.
+                  Stok tersisa hanya {selectedLoanItem?.stock} {selectedLoanItem?.unit}.
                 </p>
               )}
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
               <Textarea
                 id="notes"
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Additional details..."
+                placeholder="Detail tambahan..."
                 rows={3}
               />
             </div>
