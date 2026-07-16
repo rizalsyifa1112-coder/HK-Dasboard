@@ -6,7 +6,9 @@ export type ModuleKey =
   | 'assignments'
   | 'inspection'
   | 'laundry'
+  | 'general-laundry'
   | 'linen-tracking'
+  | 'linen-general'
   | 'store-request'
   | 'loan-management'
   | 'reports'
@@ -23,18 +25,20 @@ export type ModuleKey =
 const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
   admin: [
     'dashboard', 'room-status', 'assignments', 'inspection', 'laundry',
-    'linen-tracking', 'store-request', 'loan-management', 'reports',
-    'activity-logs', 'rooms', 'floors', 'room-types', 'sections',
-    'amenities', 'users', 'ai-vision', 'spreadsheet-templates',
+    'general-laundry', 'linen-tracking', 'linen-general', 'store-request',
+    'loan-management', 'reports', 'activity-logs', 'rooms', 'floors',
+    'room-types', 'sections', 'amenities', 'users', 'ai-vision',
+    'spreadsheet-templates',
   ],
   supervisor: [
     'dashboard', 'room-status', 'assignments', 'inspection', 'laundry',
-    'linen-tracking', 'store-request', 'loan-management', 'reports',
-    'activity-logs', 'rooms', 'floors', 'room-types', 'sections',
-    'amenities', 'ai-vision', 'spreadsheet-templates',
+    'general-laundry', 'linen-tracking', 'linen-general', 'store-request',
+    'loan-management', 'reports', 'activity-logs', 'rooms', 'floors',
+    'room-types', 'sections', 'amenities', 'ai-vision', 'spreadsheet-templates',
   ],
   order_taker: [
-    'dashboard', 'laundry', 'linen-tracking',
+    'dashboard', 'laundry', 'general-laundry', 'linen-general',
+    'loan-management', 'linen-tracking',
   ],
   housekeeping: [
     'dashboard', 'assignments',
