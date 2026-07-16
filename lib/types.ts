@@ -23,7 +23,7 @@ export interface Profile {
   updated_at: string;
 }
 
-export interface Floor {
+export interface Building {
   id: string;
   name: string;
   code: string;
@@ -31,6 +31,18 @@ export interface Floor {
   sort_order: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface Floor {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  building_id: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  building?: Building | null;
 }
 
 export interface RoomType {
