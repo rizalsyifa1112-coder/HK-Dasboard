@@ -275,6 +275,67 @@ export interface AssignmentLinenUsage {
   linen_item?: LinenInventory | null;
 }
 
+/* ===== Tambahan baru ===== */
+
+export interface LinenItem {
+  id: string;
+  code: string;
+  item_type: 'BT' | 'BM';
+  status: 'available' | 'sent_to_laundry' | 'returned' | 'lost';
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneralLaundryItem {
+  id: string;
+  name: string;
+  code: string;
+  unit: string;
+  default_price: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneralLaundryRecord {
+  id: string;
+  record_number: string;
+  send_date: string;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  items?: GeneralLaundryRecordItem[];
+  created_by_profile?: Profile | null;
+}
+
+export interface GeneralLaundryRecordItem {
+  id: string;
+  record_id: string;
+  laundry_item_id: string;
+  qty_sent: number;
+  qty_returned: number;
+  price_per_item: number;
+  created_at: string;
+  updated_at: string;
+  laundry_item?: GeneralLaundryItem | null;
+}
+
+export interface LoanItem {
+  id: string;
+  name: string;
+  code: string;
+  stock: number;
+  unit: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/* ===== Label & warna (dari code lama) ===== */
+
 export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
   dirty: 'Dirty',
   clean: 'Clean',
