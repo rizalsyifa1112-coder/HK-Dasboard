@@ -28,8 +28,15 @@ export interface FieldDef {
   type: 'text' | 'number' | 'select' | 'textarea';
   required?: boolean;
   options?: { label: string; value: string }[];
+  // Compute options dynamically based on the current form state (for cascading selects)
+  getOptions?: (form: Record<string, string | number>) => { label: string; value: string }[];
   placeholder?: string;
   defaultValue?: string | number;
+  // If true, this field is shown in the form but not saved to the database
+  // (useful as a helper filter field, e.g. "Building" when only floor_id is stored)
+  transient?: boolean;
+  // For transient fields: derive the initial value when editing an existing row
+  deriveValue?: (row: Record<string, unknown>) => string | number;
 }
 
 interface CrudTableProps<T extends { id: string }> {
@@ -66,6 +73,10 @@ export function CrudTable<T extends { id: string }>({
   const openEdit = (row: T) => {
     const values: Record<string, string | number> = {};
     fields.forEach((f) => {
+      if (f.transient && f.deriveValue) {
+        values[f.key] = f.deriveValue(row as Record<string, unknown>) ?? '';
+        return;
+      }
       const val = (row as Record<string, unknown>)[f.key];
       values[f.key] = (typeof val === 'number' ? val : (val as string) ?? '') as string | number;
     });
@@ -79,6 +90,7 @@ export function CrudTable<T extends { id: string }>({
     try {
       const payload: Record<string, unknown> = {};
       fields.forEach((f) => {
+        if (f.transient) return; // don't persist helper/filter-only fields
         const val = form[f.key];
         if (f.type === 'number') {
           payload[f.key] = val === '' ? null : Number(val);
@@ -217,41 +229,44 @@ export function CrudTable<T extends { id: string }>({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {fields.map((field) => (
-              <div key={field.key} className="space-y-1.5">
-                <Label htmlFor={field.key}>{field.label}</Label>
-                {field.type === 'textarea' ? (
-                  <textarea
-                    id={field.key}
-                    className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    value={String(form[field.key] ?? '')}
-                    onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                    placeholder={field.placeholder}
-                  />
-                ) : field.type === 'select' ? (
-                  <select
-                    id={field.key}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    value={String(form[field.key] ?? '')}
-                    onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                  >
-                    <option value="">Select...</option>
-                    {field.options?.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    id={field.key}
-                    type={field.type === 'number' ? 'number' : 'text'}
-                    value={String(form[field.key] ?? '')}
-                    onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                    placeholder={field.placeholder}
-                    required={field.required}
-                  />
-                )}
-              </div>
-            ))}
+            {fields.map((field) => {
+              const options = field.getOptions ? field.getOptions(form) : field.options;
+              return (
+                <div key={field.key} className="space-y-1.5">
+                  <Label htmlFor={field.key}>{field.label}</Label>
+                  {field.type === 'textarea' ? (
+                    <textarea
+                      id={field.key}
+                      className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={String(form[field.key] ?? '')}
+                      onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                      placeholder={field.placeholder}
+                    />
+                  ) : field.type === 'select' ? (
+                    <select
+                      id={field.key}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={String(form[field.key] ?? '')}
+                      onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                    >
+                      <option value="">Select...</option>
+                      {options?.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      id={field.key}
+                      type={field.type === 'number' ? 'number' : 'text'}
+                      value={String(form[field.key] ?? '')}
+                      onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                      placeholder={field.placeholder}
+                      required={field.required}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
