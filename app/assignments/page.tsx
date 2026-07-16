@@ -22,7 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2,
+  Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2, CheckCircle2,
 } from 'lucide-react';
 import {
   PRIORITY_LABELS, PRIORITY_COLORS,
@@ -71,16 +71,26 @@ export default function AssignmentsPage() {
     notes: '',
   });
 
-  const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.role === 'housekeeping';
+  // Admin/Supervisor can create assignments and change status freely.
+  const canManage = profile?.role === 'admin' || profile?.role === 'supervisor';
+  // Housekeeping staff can only view their own assignments and mark them done.
+  const isHousekeeping = profile?.role === 'housekeeping';
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      let assignQuery = supabase
+        .from('assignments')
+        .select('*, room:rooms(*), staff:profiles(*)')
+        .order('assigned_at', { ascending: false });
+
+      // Housekeeping staff only see assignments given to them
+      if (isHousekeeping && profile?.id) {
+        assignQuery = assignQuery.eq('staff_id', profile.id);
+      }
+
       const [assignRes, roomsRes, staffRes] = await Promise.all([
-        supabase
-          .from('assignments')
-          .select('*, room:rooms(*), staff:profiles(*)')
-          .order('assigned_at', { ascending: false }),
+        assignQuery,
         supabase.from('rooms').select('*').order('number'),
         supabase.from('profiles').select('*').eq('role', 'housekeeping').eq('active', true).order('full_name'),
       ]);
@@ -93,7 +103,7 @@ export default function AssignmentsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isHousekeeping, profile?.id]);
 
   useEffect(() => {
     fetchData();
@@ -156,20 +166,31 @@ export default function AssignmentsPage() {
     }
   };
 
+  // Housekeeping staff: mark an in-progress/pending task as completed only.
+  const handleMarkCompleted = async (assignment: Assignment) => {
+    await handleStatusChange(assignment, 'completed');
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
         title="Assignments"
-        description="Track and manage housekeeping assignments"
+        description={
+          isHousekeeping
+            ? 'Your assigned rooms'
+            : 'Track and manage housekeeping assignments'
+        }
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={fetchData}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 h-4 w-4" /> Sync Spreadsheet
-            </Button>
-            {canEdit && (
+            {canManage && (
+              <Button variant="outline" size="sm">
+                <Download className="mr-2 h-4 w-4" /> Sync Spreadsheet
+              </Button>
+            )}
+            {canManage && (
               <Button size="sm" onClick={() => setDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" /> New Assignment
               </Button>
@@ -214,7 +235,11 @@ export default function AssignmentsPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <ClipboardList className="h-10 w-10 mb-2 opacity-40" />
-            <p>No assignments found matching your filters</p>
+            <p>
+              {isHousekeeping
+                ? 'No rooms assigned to you yet'
+                : 'No assignments found matching your filters'}
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -228,7 +253,7 @@ export default function AssignmentsPage() {
                 <TableHead>Priority</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Assigned</TableHead>
-                {canEdit && <TableHead className="text-right">Actions</TableHead>}
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -260,8 +285,8 @@ export default function AssignmentsPage() {
                   <TableCell className="text-sm text-muted-foreground">
                     {a.assigned_at ? new Date(a.assigned_at).toLocaleDateString() : '-'}
                   </TableCell>
-                  {canEdit && (
-                    <TableCell className="text-right">
+                  <TableCell className="text-right">
+                    {canManage && (
                       <div className="flex justify-end gap-1 flex-wrap">
                         {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][]).map((s) => (
                           <Button
@@ -277,8 +302,28 @@ export default function AssignmentsPage() {
                           </Button>
                         ))}
                       </div>
-                    </TableCell>
-                  )}
+                    )}
+                    {isHousekeeping && a.status !== 'completed' && a.status !== 'cancelled' && (
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          disabled={updatingId === a.id}
+                          onClick={() => handleMarkCompleted(a)}
+                          className="text-xs h-7"
+                        >
+                          {updatingId === a.id ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-1 h-3 w-3" />
+                          )}
+                          Mark as Done
+                        </Button>
+                      </div>
+                    )}
+                    {isHousekeeping && (a.status === 'completed' || a.status === 'cancelled') && (
+                      <span className="text-xs text-muted-foreground">No action</span>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -286,92 +331,94 @@ export default function AssignmentsPage() {
         </div>
       )}
 
-      {/* Create Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New Assignment</DialogTitle>
-            <DialogDescription>Create a new housekeeping assignment</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Room</Label>
-              <Select value={form.room_id} onValueChange={(v) => setForm({ ...form, room_id: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select room" />
-                </SelectTrigger>
-                <SelectContent>
-                  {rooms.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>{r.number}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* Create Dialog — only rendered/openable for admin/supervisor via canManage buttons above */}
+      {canManage && (
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New Assignment</DialogTitle>
+              <DialogDescription>Create a new housekeeping assignment</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Room</Label>
+                <Select value={form.room_id} onValueChange={(v) => setForm({ ...form, room_id: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select room" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {rooms.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>{r.number}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Staff</Label>
+                <Select value={form.staff_id} onValueChange={(v) => setForm({ ...form, staff_id: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select staff (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staff.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Task Type</Label>
+                <Select
+                  value={form.task_type}
+                  onValueChange={(v) => setForm({ ...form, task_type: v as Assignment['task_type'] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(TASK_TYPE_LABELS) as Assignment['task_type'][]).map((t) => (
+                      <SelectItem key={t} value={t}>{TASK_TYPE_LABELS[t]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Priority</Label>
+                <Select
+                  value={form.priority}
+                  onValueChange={(v) => setForm({ ...form, priority: v as Priority })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(PRIORITY_LABELS) as Priority[]).map((p) => (
+                      <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Additional instructions..."
+                  rows={3}
+                />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Staff</Label>
-              <Select value={form.staff_id} onValueChange={(v) => setForm({ ...form, staff_id: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select staff (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {staff.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Task Type</Label>
-              <Select
-                value={form.task_type}
-                onValueChange={(v) => setForm({ ...form, task_type: v as Assignment['task_type'] })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(TASK_TYPE_LABELS) as Assignment['task_type'][]).map((t) => (
-                    <SelectItem key={t} value={t}>{TASK_TYPE_LABELS[t]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Priority</Label>
-              <Select
-                value={form.priority}
-                onValueChange={(v) => setForm({ ...form, priority: v as Priority })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(PRIORITY_LABELS) as Priority[]).map((p) => (
-                    <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Additional instructions..."
-                rows={3}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreate} disabled={saving}>
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
