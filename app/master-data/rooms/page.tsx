@@ -8,7 +8,7 @@ import { canManageMasterData } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import {
   HOUSEKEEPING_STATUS_LABELS, HOUSEKEEPING_STATUS_COLORS,
-  type Room, type Floor, type RoomType, type Section, type HousekeepingStatus,
+  type Room, type Floor, type RoomType, type Building,
 } from '@/lib/types';
 
 export default function RoomsPage() {
@@ -16,21 +16,21 @@ export default function RoomsPage() {
   const [data, setData] = useState<Room[]>([]);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [roomsRes, floorRes, typeRes, secRes] = await Promise.all([
-      supabase.from('rooms').select('*, floor:floors(*), room_type:room_types(*), section:sections(*)').order('number'),
-      supabase.from('floors').select('*').order('sort_order'),
+    const [roomsRes, floorRes, typeRes, buildingRes] = await Promise.all([
+      supabase.from('rooms').select('*, floor:floors(*, building:buildings(*)), room_type:room_types(*)').order('number'),
+      supabase.from('floors').select('*, building:buildings(*)').order('sort_order'),
       supabase.from('room_types').select('*').order('name'),
-      supabase.from('sections').select('*').order('name'),
+      supabase.from('buildings').select('*').order('sort_order'),
     ]);
     setData((roomsRes.data as Room[]) || []);
     setFloors((floorRes.data as Floor[]) || []);
     setRoomTypes((typeRes.data as RoomType[]) || []);
-    setSections((secRes.data as Section[]) || []);
+    setBuildings((buildingRes.data as Building[]) || []);
     setLoading(false);
   }, []);
 
@@ -40,9 +40,9 @@ export default function RoomsPage() {
 
   const columns: Column<Room>[] = [
     { key: 'number', label: 'Room No.', render: (r) => <span className="font-mono font-semibold">{r.number}</span> },
+    { key: 'building', label: 'Building', render: (r) => r.floor?.building?.name || '-' },
     { key: 'floor', label: 'Floor', render: (r) => r.floor?.name || '-' },
     { key: 'room_type', label: 'Type', render: (r) => r.room_type?.name || '-' },
-    { key: 'section', label: 'Section', render: (r) => r.section?.name || '-' },
     {
       key: 'housekeeping_status', label: 'HK Status',
       render: (r) => (
@@ -51,47 +51,31 @@ export default function RoomsPage() {
         </span>
       ),
     },
-    { key: 'occupancy_status', label: 'Occupancy', render: (r) => <span className="capitalize text-xs">{r.occupancy_status}</span> },
   ];
 
   const fields: FieldDef[] = [
-    { key: 'number', label: 'Room Number', type: 'text', required: true, placeholder: '101' },
+    { key: 'number', label: 'Room Number', type: 'text', required: true, placeholder: '301' },
     {
-      key: 'floor_id', label: 'Floor', type: 'select',
-      options: floors.map((f) => ({ label: f.name, value: f.id })),
+      key: 'building_id', label: 'Building', type: 'select', required: true, transient: true,
+      options: buildings.map((b) => ({ label: b.name, value: b.id })),
+      deriveValue: (row) => {
+        const floorId = row.floor_id as string | undefined;
+        const floor = floors.find((f) => f.id === floorId);
+        return floor?.building_id ?? '';
+      },
     },
     {
-      key: 'room_type_id', label: 'Room Type', type: 'select',
+      key: 'floor_id', label: 'Floor', type: 'select', required: true,
+      getOptions: (form) => {
+        const buildingId = form['building_id'];
+        const list = buildingId ? floors.filter((f) => f.building_id === buildingId) : floors;
+        return list.map((f) => ({ label: f.name, value: f.id }));
+      },
+    },
+    {
+      key: 'room_type_id', label: 'Room Type', type: 'select', required: true,
       options: roomTypes.map((rt) => ({ label: rt.name, value: rt.id })),
     },
-    {
-      key: 'section_id', label: 'Section', type: 'select',
-      options: sections.map((s) => ({ label: s.name, value: s.id })),
-    },
-    {
-      key: 'housekeeping_status', label: 'Housekeeping Status', type: 'select', defaultValue: 'clean',
-      options: (Object.keys(HOUSEKEEPING_STATUS_LABELS) as HousekeepingStatus[]).map((s) => ({
-        label: HOUSEKEEPING_STATUS_LABELS[s], value: s,
-      })),
-    },
-    {
-      key: 'occupancy_status', label: 'Occupancy Status', type: 'select', defaultValue: 'vacant',
-      options: [
-        { label: 'Vacant', value: 'vacant' },
-        { label: 'Occupied', value: 'occupied' },
-        { label: 'Reserved', value: 'reserved' },
-      ],
-    },
-    {
-      key: 'priority', label: 'Priority', type: 'select', defaultValue: 'normal',
-      options: [
-        { label: 'Low', value: 'low' },
-        { label: 'Normal', value: 'normal' },
-        { label: 'High', value: 'high' },
-        { label: 'Urgent', value: 'urgent' },
-      ],
-    },
-    { key: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Optional notes' },
   ];
 
   return (
