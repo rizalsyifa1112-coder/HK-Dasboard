@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   BedDouble, CheckCircle2, AlertCircle, DoorOpen, Users,
-  Shirt, Layers, TrendingUp, Clock, Sparkles, Download,
+  Shirt, Layers, TrendingUp, Clock, Sparkles, Download, Percent,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -31,6 +31,7 @@ interface Stats {
   outOfOrder: number;
   occupiedCount: number;
   vacantCount: number;
+  occupancyRate: number;
   pendingAssignments: number;
   completedAssignments: number;
   inProgressAssignments: number;
@@ -61,9 +62,16 @@ export default function DashboardPage() {
       const laundry = laundryRes.data || [];
       const linen = (linenRes.data as LinenInventory[]) || [];
 
+      const dirtyCount = rooms.filter((r) => r.housekeeping_status === 'dirty').length;
+      const totalRoomsCount = rooms.length;
+      // Occupancy = dirty rooms / total available rooms x 100
+      const occupancyRate = totalRoomsCount > 0
+        ? Math.round((dirtyCount / totalRoomsCount) * 1000) / 10
+        : 0;
+
       const s: Stats = {
-        totalRooms: rooms.length,
-        dirty: rooms.filter((r) => r.housekeeping_status === 'dirty').length,
+        totalRooms: totalRoomsCount,
+        dirty: dirtyCount,
         clean: rooms.filter((r) => r.housekeeping_status === 'clean').length,
         inspected: rooms.filter((r) => r.housekeeping_status === 'inspected').length,
         occupied: rooms.filter((r) => r.housekeeping_status === 'occupied').length,
@@ -71,6 +79,7 @@ export default function DashboardPage() {
         outOfOrder: rooms.filter((r) => r.housekeeping_status === 'out_of_order').length,
         occupiedCount: rooms.filter((r) => r.occupancy_status === 'occupied').length,
         vacantCount: rooms.filter((r) => r.occupancy_status === 'vacant').length,
+        occupancyRate,
         pendingAssignments: assignments.filter((a) => a.status === 'pending').length,
         completedAssignments: assignments.filter((a) => a.status === 'completed').length,
         inProgressAssignments: assignments.filter((a) => a.status === 'in_progress').length,
@@ -131,6 +140,15 @@ export default function DashboardPage() {
     );
   }
 
+  const occupancyRate = stats?.occupancyRate ?? 0;
+  const occupancyLevel =
+    occupancyRate >= 70 ? 'high' : occupancyRate >= 40 ? 'medium' : 'low';
+  const occupancyColor = {
+    high: { text: 'text-red-500', bg: 'bg-red-500/10', bar: 'bg-red-500' },
+    medium: { text: 'text-amber-500', bg: 'bg-amber-500/10', bar: 'bg-amber-500' },
+    low: { text: 'text-emerald-500', bg: 'bg-emerald-500/10', bar: 'bg-emerald-500' },
+  }[occupancyLevel];
+
   const statCards = [
     { label: 'Total Rooms', value: stats?.totalRooms ?? 0, icon: BedDouble, color: 'text-primary', bg: 'bg-primary/10' },
     { label: 'Dirty Rooms', value: stats?.dirty ?? 0, icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
@@ -154,6 +172,41 @@ export default function DashboardPage() {
           </Button>
         }
       />
+
+      {/* Occupancy Highlight Card */}
+      <Card className="overflow-hidden">
+        <CardContent className="p-4 md:p-5">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className={cn('h-12 w-12 rounded-xl flex items-center justify-center shrink-0', occupancyColor.bg)}>
+                <Percent className={cn('h-6 w-6', occupancyColor.text)} />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Occupancy (Dirty Rooms)</p>
+                <div className="flex items-baseline gap-2">
+                  <p className={cn('text-3xl font-bold', occupancyColor.text)}>
+                    {occupancyRate}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {stats?.dirty ?? 0} of {stats?.totalRooms ?? 0} rooms dirty
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="w-full md:w-64">
+              <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn('h-full rounded-full transition-all', occupancyColor.bar)}
+                  style={{ width: `${Math.min(occupancyRate, 100)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1 text-right">
+                Synced from latest PMS screenshot via AI Vision OCR
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
