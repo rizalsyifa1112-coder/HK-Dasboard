@@ -1,20 +1,18 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -26,7 +24,8 @@ import {
 } from 'lucide-react';
 import {
   PRIORITY_LABELS, PRIORITY_COLORS,
-  type Assignment, type Room, type Profile, type Priority,
+  HOUSEKEEPING_STATUS_LABELS, HOUSEKEEPING_STATUS_COLORS,
+  type Assignment, type Room, type Profile, type Priority, type Floor, type RoomType,
 } from '@/lib/types';
 
 const ASSIGNMENT_STATUS_LABELS: Record<Assignment['status'], string> = {
@@ -51,11 +50,16 @@ const TASK_TYPE_LABELS: Record<Assignment['task_type'], string> = {
   vacant: 'Vacant',
 };
 
+type RoomWithMeta = Room & {
+  floor: Floor | null;
+  room_type: RoomType | null;
+};
+
 export default function AssignmentsPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [rooms, setRooms] = useState<RoomWithMeta[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -63,17 +67,14 @@ export default function AssignmentsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    room_id: '',
-    staff_id: '',
-    task_type: 'cleaning' as Assignment['task_type'],
-    priority: 'normal' as Priority,
-    notes: '',
-  });
 
-  // Admin/Supervisor can create assignments and change status freely.
+  // Bulk-assign table state: roomId -> selected staffId
+  const [roomAssignments, setRoomAssignments] = useState<Record<string, string>>({});
+  const [roomTaskTypes, setRoomTaskTypes] = useState<Record<string, Assignment['task_type']>>({});
+  const [roomPriorities, setRoomPriorities] = useState<Record<string, Priority>>({});
+  const [tableSearch, setTableSearch] = useState('');
+
   const canManage = profile?.role === 'admin' || profile?.role === 'supervisor';
-  // Housekeeping staff can only view their own assignments and mark them done.
   const isHousekeeping = profile?.role === 'housekeeping';
 
   const fetchData = useCallback(async () => {
@@ -84,19 +85,21 @@ export default function AssignmentsPage() {
         .select('*, room:rooms(*), staff:profiles(*)')
         .order('assigned_at', { ascending: false });
 
-      // Housekeeping staff only see assignments given to them
       if (isHousekeeping && profile?.id) {
         assignQuery = assignQuery.eq('staff_id', profile.id);
       }
 
       const [assignRes, roomsRes, staffRes] = await Promise.all([
         assignQuery,
-        supabase.from('rooms').select('*').order('number'),
+        supabase
+          .from('rooms')
+          .select('*, floor:floors(*), room_type:room_types(*)')
+          .order('number'),
         supabase.from('profiles').select('*').eq('role', 'housekeeping').eq('active', true).order('full_name'),
       ]);
 
       setAssignments((assignRes.data as Assignment[]) || []);
-      setRooms((roomsRes.data as Room[]) || []);
+      setRooms((roomsRes.data as RoomWithMeta[]) || []);
       setStaff((staffRes.data as Profile[]) || []);
     } catch (err) {
       console.error('Error fetching assignments:', err);
@@ -119,28 +122,68 @@ export default function AssignmentsPage() {
     return matchSearch && matchStatus;
   });
 
-  const handleCreate = async () => {
-    if (!form.room_id) {
-      toast({ title: 'Validation', description: 'Please select a room', variant: 'destructive' });
+  // Group rooms by floor -> room type for the bulk assignment table
+  const roomsByFloor = useMemo(() => {
+    const q = tableSearch.toLowerCase();
+    const filteredRooms = rooms.filter((r) => {
+      if (!q) return true;
+      return (
+        r.number.toLowerCase().includes(q) ||
+        (r.room_type?.name ?? '').toLowerCase().includes(q) ||
+        (r.floor?.name ?? '').toLowerCase().includes(q)
+      );
+    });
+
+    const floorMap = new Map<string, { floor: Floor | null; rooms: RoomWithMeta[] }>();
+    for (const r of filteredRooms) {
+      const key = r.floor?.id ?? 'no-floor';
+      if (!floorMap.has(key)) {
+        floorMap.set(key, { floor: r.floor, rooms: [] });
+      }
+      floorMap.get(key)!.rooms.push(r);
+    }
+    return Array.from(floorMap.values()).sort((a, b) => {
+      const so = (a.floor?.sort_order ?? 0) - (b.floor?.sort_order ?? 0);
+      return so;
+    }).map((g) => ({
+      ...g,
+      rooms: g.rooms.sort((a, b) => a.number.localeCompare(b.number)),
+    }));
+  }, [rooms, tableSearch]);
+
+  const openBulkDialog = () => {
+    setRoomAssignments({});
+    setRoomTaskTypes({});
+    setRoomPriorities({});
+    setTableSearch('');
+    setDialogOpen(true);
+  };
+
+  const selectedCount = Object.values(roomAssignments).filter(Boolean).length;
+
+  const handleBulkCreate = async () => {
+    const entries = Object.entries(roomAssignments).filter(([, staffId]) => !!staffId);
+    if (entries.length === 0) {
+      toast({ title: 'Validation', description: 'Select at least one staff for a room', variant: 'destructive' });
       return;
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from('assignments').insert({
-        room_id: form.room_id,
-        staff_id: form.staff_id || null,
-        task_type: form.task_type,
-        priority: form.priority,
-        notes: form.notes || null,
-        status: 'pending',
-      });
+      const inserts = entries.map(([roomId, staffId]) => ({
+        room_id: roomId,
+        staff_id: staffId,
+        task_type: roomTaskTypes[roomId] ?? 'cleaning',
+        priority: roomPriorities[roomId] ?? 'normal',
+        status: 'pending' as const,
+      }));
+      const { error } = await supabase.from('assignments').insert(inserts);
       if (error) throw error;
-      toast({ title: 'Created', description: 'Assignment created successfully' });
+      toast({ title: 'Created', description: `${inserts.length} assignment(s) created successfully` });
       setDialogOpen(false);
-      setForm({ room_id: '', staff_id: '', task_type: 'cleaning', priority: 'normal', notes: '' });
+      setRoomAssignments({});
       fetchData();
     } catch (err) {
-      console.error('Create error:', err);
+      console.error('Bulk create error:', err);
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
       setSaving(false);
@@ -166,7 +209,6 @@ export default function AssignmentsPage() {
     }
   };
 
-  // Housekeeping staff: mark an in-progress/pending task as completed only.
   const handleMarkCompleted = async (assignment: Assignment) => {
     await handleStatusChange(assignment, 'completed');
   };
@@ -191,7 +233,7 @@ export default function AssignmentsPage() {
               </Button>
             )}
             {canManage && (
-              <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Button size="sm" onClick={openBulkDialog}>
                 <Plus className="mr-2 h-4 w-4" /> New Assignment
               </Button>
             )}
@@ -331,89 +373,135 @@ export default function AssignmentsPage() {
         </div>
       )}
 
-      {/* Create Dialog — only rendered/openable for admin/supervisor via canManage buttons above */}
+      {/* Bulk Assignment Dialog: all rooms grouped by floor, with staff select per room */}
       {canManage && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent>
+          <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>New Assignment</DialogTitle>
-              <DialogDescription>Create a new housekeeping assignment</DialogDescription>
+              <DialogDescription>
+                Assign staff to rooms below. Only rooms with a selected staff will be created.
+                {selectedCount > 0 && (
+                  <span className="ml-1 font-medium text-primary">{selectedCount} room(s) selected</span>
+                )}
+              </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Room</Label>
-                <Select value={form.room_id} onValueChange={(v) => setForm({ ...form, room_id: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select room" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {rooms.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>{r.number}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Staff</Label>
-                <Select value={form.staff_id} onValueChange={(v) => setForm({ ...form, staff_id: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select staff (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staff.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Task Type</Label>
-                <Select
-                  value={form.task_type}
-                  onValueChange={(v) => setForm({ ...form, task_type: v as Assignment['task_type'] })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(TASK_TYPE_LABELS) as Assignment['task_type'][]).map((t) => (
-                      <SelectItem key={t} value={t}>{TASK_TYPE_LABELS[t]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Priority</Label>
-                <Select
-                  value={form.priority}
-                  onValueChange={(v) => setForm({ ...form, priority: v as Priority })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(PRIORITY_LABELS) as Priority[]).map((p) => (
-                      <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  placeholder="Additional instructions..."
-                  rows={3}
-                />
-              </div>
+
+            <div className="relative mb-2">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search room, type, or floor..."
+                className="pl-8"
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+              />
             </div>
-            <DialogFooter>
+
+            <div className="flex-1 overflow-y-auto rounded-md border">
+              <Table>
+                <TableHeader className="sticky top-0 bg-card z-10">
+                  <TableRow>
+                    <TableHead>Room</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Current Status</TableHead>
+                    <TableHead>Assign To</TableHead>
+                    <TableHead>Task Type</TableHead>
+                    <TableHead>Priority</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {roomsByFloor.map(({ floor, rooms: floorRooms }) => (
+                    <>
+                      <TableRow key={`floor-${floor?.id ?? 'none'}`} className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={6} className="font-semibold text-xs uppercase tracking-wide py-1.5">
+                          {floor?.name ?? 'Unassigned Floor'}
+                        </TableCell>
+                      </TableRow>
+                      {floorRooms.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="font-mono font-medium">{r.number}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {r.room_type?.name ?? '-'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={cn('text-xs', HOUSEKEEPING_STATUS_COLORS[r.housekeeping_status])}
+                            >
+                              {HOUSEKEEPING_STATUS_LABELS[r.housekeeping_status]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={roomAssignments[r.id] ?? ''}
+                              onValueChange={(v) =>
+                                setRoomAssignments((prev) => ({ ...prev, [r.id]: v }))
+                              }
+                            >
+                              <SelectTrigger className="h-8 w-[160px] text-xs">
+                                <SelectValue placeholder="Unassigned" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {staff.map((s) => (
+                                  <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={roomTaskTypes[r.id] ?? 'cleaning'}
+                              onValueChange={(v) =>
+                                setRoomTaskTypes((prev) => ({ ...prev, [r.id]: v as Assignment['task_type'] }))
+                              }
+                            >
+                              <SelectTrigger className="h-8 w-[130px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(Object.keys(TASK_TYPE_LABELS) as Assignment['task_type'][]).map((t) => (
+                                  <SelectItem key={t} value={t}>{TASK_TYPE_LABELS[t]}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={roomPriorities[r.id] ?? 'normal'}
+                              onValueChange={(v) =>
+                                setRoomPriorities((prev) => ({ ...prev, [r.id]: v as Priority }))
+                              }
+                            >
+                              <SelectTrigger className="h-8 w-[110px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(Object.keys(PRIORITY_LABELS) as Priority[]).map((p) => (
+                                  <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </>
+                  ))}
+                  {roomsByFloor.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                        No rooms found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <DialogFooter className="mt-3">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={saving}>
+              <Button onClick={handleBulkCreate} disabled={saving || selectedCount === 0}>
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create
+                Create {selectedCount > 0 ? `(${selectedCount})` : ''} Assignment{selectedCount === 1 ? '' : 's'}
               </Button>
             </DialogFooter>
           </DialogContent>
