@@ -241,6 +241,28 @@ export interface SpreadsheetTemplate {
   updated_at: string;
 }
 
+export interface AssignmentAmenityUsage {
+  id: string;
+  assignment_id: string;
+  amenity_id: string;
+  quantity: number;
+  recorded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  amenity?: Amenity | null;
+}
+
+export interface AssignmentLinenUsage {
+  id: string;
+  assignment_id: string;
+  linen_item_id: string;
+  quantity: number;
+  recorded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  linen_item?: LinenInventory | null;
+}
+
 export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
   dirty: 'Dirty',
   clean: 'Clean',
