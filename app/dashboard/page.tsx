@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   BedDouble, CheckCircle2, AlertCircle, DoorOpen, Users,
-  Shirt, Layers, TrendingUp, Clock, Sparkles, Download, Percent,
+  Shirt, Layers, TrendingUp, Clock, Sparkles, Download, Percent, LogOut,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -27,6 +27,7 @@ interface Stats {
   vacantCleanInspected: number;
   occupiedClean: number;
   occupiedDirty: number;
+  expectedDeparture: number;
   outOfOrder: number;
   offMarket: number;
   totalDirty: number;
@@ -79,6 +80,7 @@ export default function DashboardPage() {
         vacantCleanInspected: rooms.filter((r) => r.housekeeping_status === 'vacant_clean_inspected').length,
         occupiedClean: rooms.filter((r) => r.housekeeping_status === 'occupied_clean').length,
         occupiedDirty,
+        expectedDeparture: rooms.filter((r) => r.housekeeping_status === 'expected_departure').length,
         outOfOrder: rooms.filter((r) => r.housekeeping_status === 'out_of_order').length,
         offMarket: rooms.filter((r) => r.housekeeping_status === 'off_market').length,
         totalDirty,
@@ -114,6 +116,7 @@ export default function DashboardPage() {
         { name: 'Vacant Inspected', value: stats.vacantCleanInspected, color: '#3b82f6' },
         { name: 'Occupied Clean', value: stats.occupiedClean, color: '#14b8a6' },
         { name: 'Occupied Dirty', value: stats.occupiedDirty, color: '#f59e0b' },
+        { name: 'Expected Departure', value: stats.expectedDeparture, color: '#6366f1' },
         { name: 'O/O', value: stats.outOfOrder, color: '#71717a' },
         { name: 'Off Market', value: stats.offMarket, color: '#a855f7' },
       ]
@@ -162,6 +165,7 @@ export default function DashboardPage() {
     { label: 'Vacant Inspected', value: stats?.vacantCleanInspected ?? 0, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
     { label: 'Occupied Clean', value: stats?.occupiedClean ?? 0, icon: Users, color: 'text-teal-500', bg: 'bg-teal-500/10' },
     { label: 'Occupied Dirty', value: stats?.occupiedDirty ?? 0, icon: Users, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { label: 'Expected Departure', value: stats?.expectedDeparture ?? 0, icon: LogOut, color: 'text-indigo-500', bg: 'bg-indigo-500/10' },
     { label: 'Out Of Order', value: stats?.outOfOrder ?? 0, icon: DoorOpen, color: 'text-zinc-500', bg: 'bg-zinc-500/10' },
     { label: 'Off Market', value: stats?.offMarket ?? 0, icon: DoorOpen, color: 'text-purple-500', bg: 'bg-purple-500/10' },
     { label: 'Pending Tasks', value: stats?.pendingAssignments ?? 0, icon: Clock, color: 'text-orange-500', bg: 'bg-orange-500/10' },
