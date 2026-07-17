@@ -31,7 +31,6 @@ export async function POST(req: NextRequest) {
       .single();
     if (error || !assignment) throw error ?? new Error('Assignment not found');
 
-    // Ambil config target spreadsheet
     const { data: template } = await supabaseAdmin
       .from('spreadsheet_templates')
       .select('*')
@@ -49,7 +48,6 @@ export async function POST(req: NextRequest) {
     const staffName = assignment.staff?.full_name ?? 'Unknown';
     const tabName = `${staffName} - ${dateStr}`;
 
-    // Cari / buat state tracking
     const { data: state } = await supabaseAdmin
       .from('hk_sheet_sync_state')
       .select('*')
@@ -57,19 +55,16 @@ export async function POST(req: NextRequest) {
       .eq('sync_date', dateObj.toISOString().slice(0, 10))
       .maybeSingle();
 
-    let sheetTabExists = false;
     let nextRow = 9;
     let seq = 1;
 
     if (state) {
-      sheetTabExists = true;
       nextRow = state.next_row_number;
       seq = state.room_sequence;
     } else {
       const existingTabId = await findTabByName(spreadsheetId, tabName);
       if (!existingTabId) {
         await duplicateTemplateTab(spreadsheetId, templateSheetId, tabName);
-        // Isi header dinamis: NAME, DATE, SHIFT, FLOOR/SECTION
         await writeRange(spreadsheetId, `${tabName}!B4`, [[staffName]]);
         await writeRange(spreadsheetId, `${tabName}!M4`, [[dateStr]]);
         await writeRange(spreadsheetId, `${tabName}!AE4`, [['Morning']]);
@@ -77,7 +72,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Ambil linen & amenity usage
     const [linenRes, amenityRes] = await Promise.all([
       supabaseAdmin
         .from('assignment_linen_usage')
@@ -113,7 +107,6 @@ export async function POST(req: NextRequest) {
 
     await writeRange(spreadsheetId, `${tabName}!A${nextRow}`, [row]);
 
-    // Update / insert tracking state
     await supabaseAdmin.from('hk_sheet_sync_state').upsert(
       {
         staff_id: assignment.staff_id,
