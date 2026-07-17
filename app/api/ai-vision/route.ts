@@ -32,7 +32,7 @@ IMPORTANT RULES:
 - Return ONLY a JSON array, no explanation, no markdown, no backticks
 - Format: [{"roomNumber":"301","status":"vacant_clean"},{"roomNumber":"302","status":"occupied_dirty"}]`;
     const response = await fetch(
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+  `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
