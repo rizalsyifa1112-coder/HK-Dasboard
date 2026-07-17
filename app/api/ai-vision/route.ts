@@ -19,6 +19,7 @@ Map the PMS status text to exactly one of these system statuses:
 - vacant_clean_inspected: room is vacant, clean and inspected/checked (Vac. Clean Checked, Vacant Clean Checked, Inspected, Vac. Clean Checked AA)
 - occupied_clean: room is occupied by a guest and clean (Occupied Cleaned, Occupied Clean)
 - occupied_dirty: room is occupied by a guest and needs cleaning (Occupied Dirty, Occupied)
+- expected_departure: room is occupied but guest is checking out today (Expected Departure, Expected Departure DD, Exp. Departure)
 - out_of_order: room is out of order (Out of Order, OOO, OO)
 - off_market: room is off market / not available for sale (Off Market, OM)
 IMPORTANT RULES:
