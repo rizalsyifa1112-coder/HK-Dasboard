@@ -110,6 +110,9 @@ export interface Assignment {
   assigned_at: string;
   started_at: string | null;
   completed_at: string | null;
+  fo_status: string | null;
+  hk_status_in: string | null;
+  hk_status_final: string | null;
   created_at: string;
   updated_at: string;
   room?: Room | null;
@@ -276,6 +279,8 @@ export interface AssignmentLinenUsage {
   assignment_id: string;
   linen_item_id: string;
   quantity: number;
+  quantity_in: number;
+  quantity_out: number;
   recorded_by: string | null;
   created_at: string;
   updated_at: string;
