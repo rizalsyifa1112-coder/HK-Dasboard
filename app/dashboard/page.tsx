@@ -23,6 +23,7 @@ import {
 interface Stats {
   totalRooms: number;
   vacantDirty: number;
+  vacantCleanUnchecked: number;
   vacantClean: number;
   vacantCleanInspected: number;
   occupiedClean: number;
@@ -76,6 +77,7 @@ export default function DashboardPage() {
       const s: Stats = {
         totalRooms: totalRoomsCount,
         vacantDirty,
+        vacantCleanUnchecked: rooms.filter((r) => r.housekeeping_status === 'vacant_clean_unchecked').length,
         vacantClean: rooms.filter((r) => r.housekeeping_status === 'vacant_clean').length,
         vacantCleanInspected: rooms.filter((r) => r.housekeeping_status === 'vacant_clean_inspected').length,
         occupiedClean: rooms.filter((r) => r.housekeeping_status === 'occupied_clean').length,
@@ -112,6 +114,7 @@ export default function DashboardPage() {
   const statusChartData = stats
     ? [
         { name: 'Vacant Dirty', value: stats.vacantDirty, color: '#ef4444' },
+        { name: 'Vacant Clean Uncheck', value: stats.vacantCleanUnchecked, color: '#f97316' },
         { name: 'Vacant Clean', value: stats.vacantClean, color: '#10b981' },
         { name: 'Vacant Inspected', value: stats.vacantCleanInspected, color: '#3b82f6' },
         { name: 'Occupied Clean', value: stats.occupiedClean, color: '#14b8a6' },
@@ -161,6 +164,7 @@ export default function DashboardPage() {
   const statCards = [
     { label: 'Total Rooms', value: stats?.totalRooms ?? 0, icon: BedDouble, color: 'text-primary', bg: 'bg-primary/10' },
     { label: 'Vacant Dirty', value: stats?.vacantDirty ?? 0, icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
+    { label: 'Vacant Clean Uncheck', value: stats?.vacantCleanUnchecked ?? 0, icon: Sparkles, color: 'text-orange-500', bg: 'bg-orange-500/10' },
     { label: 'Vacant Clean', value: stats?.vacantClean ?? 0, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
     { label: 'Vacant Inspected', value: stats?.vacantCleanInspected ?? 0, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
     { label: 'Occupied Clean', value: stats?.occupiedClean ?? 0, icon: Users, color: 'text-teal-500', bg: 'bg-teal-500/10' },
