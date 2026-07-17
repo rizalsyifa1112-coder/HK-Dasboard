@@ -1,12 +1,13 @@
 export type UserRole = 'admin' | 'supervisor' | 'order_taker' | 'housekeeping';
 
 export type HousekeepingStatus =
-  | 'dirty'
-  | 'clean'
-  | 'inspected'
-  | 'occupied'
-  | 'vacant'
-  | 'out_of_order';
+  | 'vacant_dirty'
+  | 'vacant_clean'
+  | 'vacant_clean_inspected'
+  | 'occupied_clean'
+  | 'occupied_dirty'
+  | 'out_of_order'
+  | 'off_market';
 
 export type OccupancyStatus = 'occupied' | 'vacant' | 'reserved';
 
@@ -341,21 +342,23 @@ export interface LoanItem {
 /* ===== Label & warna (dari code lama) ===== */
 
 export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
-  dirty: 'Dirty',
-  clean: 'Clean',
-  inspected: 'Inspected',
-  occupied: 'Occupied',
-  vacant: 'Vacant',
-  out_of_order: 'Out of Order',
+  vacant_dirty: 'Vacant Dirty',
+  vacant_clean: 'Vacant Clean',
+  vacant_clean_inspected: 'Vacant Clean Inspected',
+  occupied_clean: 'Occupied Clean',
+  occupied_dirty: 'Occupied Dirty',
+  out_of_order: 'Out Of Order',
+  off_market: 'Off Market',
 };
 
 export const HOUSEKEEPING_STATUS_COLORS: Record<HousekeepingStatus, string> = {
-  dirty: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
-  clean: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
-  inspected: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
-  occupied: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
-  vacant: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
+  vacant_dirty: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+  vacant_clean: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+  vacant_clean_inspected: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+  occupied_clean: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30',
+  occupied_dirty: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
   out_of_order: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
+  off_market: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30',
 };
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
