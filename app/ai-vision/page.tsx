@@ -151,7 +151,7 @@ export default function AIVisionPage() {
     if (file) processFile(file);
   };
 
-  // Call server API route (avoids CORS — browser cannot call Anthropic directly)
+  // Call server API route (avoids CORS — browser cannot call Gemini directly)
   const readImageWithAI = async (): Promise<{ roomNumber: string; status: HousekeepingStatus }[]> => {
     if (!imageBase64) return [];
 
@@ -199,7 +199,7 @@ export default function AIVisionPage() {
 
       if (imageBase64) {
         try {
-          toast({ title: 'Reading image...', description: 'Claude AI is analyzing your PMS screenshot' });
+          toast({ title: 'Reading image...', description: 'AI is analyzing your PMS screenshot' });
           detected = await readImageWithAI();
           setAiMode(true);
           if (detected.length === 0) {
@@ -224,16 +224,12 @@ export default function AIVisionPage() {
         setAiMode(false);
       }
 
-      if (detected.length === 0 && dbRooms.length > 0) {
-        const sample = dbRooms.slice(0, Math.min(10, dbRooms.length));
-        detected = sample.map((r) => ({
-          roomNumber: r.number,
-          status: STATUS_VALUES[Math.floor(Math.random() * STATUS_VALUES.length)],
-        }));
-      }
-
       if (detected.length === 0) {
-        toast({ title: 'Nothing detected', description: 'Upload an image or paste room data manually.', variant: 'destructive' });
+        toast({
+          title: 'Nothing detected',
+          description: 'AI could not read the screenshot and no manual data was entered. Please check your Gemini API key/quota, or try the manual text box.',
+          variant: 'destructive',
+        });
         setProcessing(false);
         return;
       }
@@ -286,13 +282,14 @@ export default function AIVisionPage() {
       for (const row of validRows) {
         const updates: Record<string, unknown> = { housekeeping_status: row.pmsStatus };
         if (['vacant_clean', 'vacant_clean_inspected', 'occupied_clean'].includes(row.pmsStatus)) {
-  updates.last_cleaned_at = new Date().toISOString();
-}
-if (['occupied_clean', 'occupied_dirty'].includes(row.pmsStatus)) {
-  updates.occupancy_status = 'occupied';
-}
-if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsStatus)) {
-  updates.occupancy_status = 'vacant';
+          updates.last_cleaned_at = new Date().toISOString();
+        }
+        if (['occupied_clean', 'occupied_dirty'].includes(row.pmsStatus)) {
+          updates.occupancy_status = 'occupied';
+        }
+        if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsStatus)) {
+          updates.occupancy_status = 'vacant';
+        }
         const { error } = await supabase.from('rooms').update(updates).eq('id', row.dbRoomId);
         if (error) { fail++; } else { ok++; }
       }
@@ -326,7 +323,7 @@ if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsS
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
         title="AI Vision OCR"
-        description="Upload a PMS screenshot — Claude AI will automatically read and sync room statuses"
+        description="Upload a PMS screenshot — AI will automatically read and sync room statuses"
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={fetchDbRooms} disabled={loadingDb}>
@@ -342,9 +339,9 @@ if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsS
       <div className="flex items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm">
         <Brain className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
         <div>
-          <p className="font-medium text-blue-700 dark:text-blue-400">AI Vision powered by Claude</p>
+          <p className="font-medium text-blue-700 dark:text-blue-400">AI Vision OCR</p>
           <p className="text-muted-foreground mt-0.5">
-            Upload your PMS screenshot and click <strong>Process Screenshot</strong> — Claude AI will
+            Upload your PMS screenshot and click <strong>Process Screenshot</strong> — AI will
             automatically read all room numbers and statuses, then map them to the correct system format.
             No manual typing needed.
           </p>
@@ -428,7 +425,7 @@ if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsS
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border border-muted bg-muted/30 p-3 text-sm text-muted-foreground">
-            <p>If you have uploaded an image above, click <strong>Process Screenshot</strong> — Claude AI will read it automatically.</p>
+            <p>If you have uploaded an image above, click <strong>Process Screenshot</strong> — AI will read it automatically.</p>
             <p className="mt-1">Or paste room data manually below as fallback (one per line: <span className="font-mono">roomNumber status</span>):</p>
           </div>
           <div className="space-y-1.5">
@@ -437,7 +434,7 @@ if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsS
               id="manualText"
               value={manualText}
               onChange={(e) => { setManualText(e.target.value); setApplied(false); }}
-              placeholder={'101 dirty\n102 clean\n103 inspected'}
+              placeholder={'101 vacant_dirty\n102 vacant_clean\n103 vacant_clean_inspected'}
               rows={4}
               className="font-mono text-sm"
             />
