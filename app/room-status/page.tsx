@@ -80,10 +80,12 @@ export default function RoomStatusPage() {
     try {
       const updates: Record<string, unknown> = {
         housekeeping_status: newStatus,
-        last_cleaned_at: newStatus === 'clean' || newStatus === 'inspected' ? new Date().toISOString() : room.last_cleaned_at,
+        last_cleaned_at: (newStatus === 'vacant_clean' || newStatus === 'vacant_clean_inspected' || newStatus === 'occupied_clean')
+          ? new Date().toISOString()
+          : room.last_cleaned_at,
       };
-      if (newStatus === 'occupied') updates.occupancy_status = 'occupied';
-      if (newStatus === 'vacant') updates.occupancy_status = 'vacant';
+      if (newStatus === 'occupied_clean' || newStatus === 'occupied_dirty') updates.occupancy_status = 'occupied';
+      if (newStatus === 'vacant_dirty' || newStatus === 'vacant_clean' || newStatus === 'vacant_clean_inspected') updates.occupancy_status = 'vacant';
 
       const { error } = await supabase.from('rooms').update(updates).eq('id', room.id);
       if (error) throw error;
@@ -97,13 +99,14 @@ export default function RoomStatusPage() {
     }
   };
 
-  const statusCounts = {
-    dirty: filteredRooms.filter((r) => r.housekeeping_status === 'dirty').length,
-    clean: filteredRooms.filter((r) => r.housekeeping_status === 'clean').length,
-    inspected: filteredRooms.filter((r) => r.housekeeping_status === 'inspected').length,
-    occupied: filteredRooms.filter((r) => r.housekeeping_status === 'occupied').length,
-    vacant: filteredRooms.filter((r) => r.housekeeping_status === 'vacant').length,
+  const statusCounts: Record<HousekeepingStatus, number> = {
+    vacant_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_dirty').length,
+    vacant_clean: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean').length,
+    vacant_clean_inspected: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean_inspected').length,
+    occupied_clean: filteredRooms.filter((r) => r.housekeeping_status === 'occupied_clean').length,
+    occupied_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'occupied_dirty').length,
     out_of_order: filteredRooms.filter((r) => r.housekeeping_status === 'out_of_order').length,
+    off_market: filteredRooms.filter((r) => r.housekeeping_status === 'off_market').length,
   };
 
   return (
