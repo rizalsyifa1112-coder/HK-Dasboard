@@ -14,21 +14,22 @@ import {
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Area, AreaChart,
+  PieChart, Pie, Cell,
 } from 'recharts';
 import {
-  HOUSEKEEPING_STATUS_LABELS, HOUSEKEEPING_STATUS_COLORS,
   type Room, type Assignment, type LinenInventory,
 } from '@/lib/types';
 
 interface Stats {
   totalRooms: number;
-  dirty: number;
-  clean: number;
-  inspected: number;
-  occupied: number;
-  vacant: number;
+  vacantDirty: number;
+  vacantClean: number;
+  vacantCleanInspected: number;
+  occupiedClean: number;
+  occupiedDirty: number;
   outOfOrder: number;
+  offMarket: number;
+  totalDirty: number;
   occupiedCount: number;
   vacantCount: number;
   occupancyRate: number;
@@ -62,21 +63,25 @@ export default function DashboardPage() {
       const laundry = laundryRes.data || [];
       const linen = (linenRes.data as LinenInventory[]) || [];
 
-      const dirtyCount = rooms.filter((r) => r.housekeeping_status === 'dirty').length;
+      const vacantDirty = rooms.filter((r) => r.housekeeping_status === 'vacant_dirty').length;
+      const occupiedDirty = rooms.filter((r) => r.housekeeping_status === 'occupied_dirty').length;
+      const totalDirty = vacantDirty + occupiedDirty;
       const totalRoomsCount = rooms.length;
       // Occupancy = dirty rooms / total available rooms x 100
       const occupancyRate = totalRoomsCount > 0
-        ? Math.round((dirtyCount / totalRoomsCount) * 1000) / 10
+        ? Math.round((totalDirty / totalRoomsCount) * 1000) / 10
         : 0;
 
       const s: Stats = {
         totalRooms: totalRoomsCount,
-        dirty: dirtyCount,
-        clean: rooms.filter((r) => r.housekeeping_status === 'clean').length,
-        inspected: rooms.filter((r) => r.housekeeping_status === 'inspected').length,
-        occupied: rooms.filter((r) => r.housekeeping_status === 'occupied').length,
-        vacant: rooms.filter((r) => r.housekeeping_status === 'vacant').length,
+        vacantDirty,
+        vacantClean: rooms.filter((r) => r.housekeeping_status === 'vacant_clean').length,
+        vacantCleanInspected: rooms.filter((r) => r.housekeeping_status === 'vacant_clean_inspected').length,
+        occupiedClean: rooms.filter((r) => r.housekeeping_status === 'occupied_clean').length,
+        occupiedDirty,
         outOfOrder: rooms.filter((r) => r.housekeeping_status === 'out_of_order').length,
+        offMarket: rooms.filter((r) => r.housekeeping_status === 'off_market').length,
+        totalDirty,
         occupiedCount: rooms.filter((r) => r.occupancy_status === 'occupied').length,
         vacantCount: rooms.filter((r) => r.occupancy_status === 'vacant').length,
         occupancyRate,
@@ -104,12 +109,13 @@ export default function DashboardPage() {
 
   const statusChartData = stats
     ? [
-        { name: 'Dirty', value: stats.dirty, color: '#ef4444' },
-        { name: 'Clean', value: stats.clean, color: '#10b981' },
-        { name: 'Inspected', value: stats.inspected, color: '#3b82f6' },
-        { name: 'Occupied', value: stats.occupied, color: '#f59e0b' },
-        { name: 'Vacant', value: stats.vacant, color: '#64748b' },
+        { name: 'Vacant Dirty', value: stats.vacantDirty, color: '#ef4444' },
+        { name: 'Vacant Clean', value: stats.vacantClean, color: '#10b981' },
+        { name: 'Vacant Inspected', value: stats.vacantCleanInspected, color: '#3b82f6' },
+        { name: 'Occupied Clean', value: stats.occupiedClean, color: '#14b8a6' },
+        { name: 'Occupied Dirty', value: stats.occupiedDirty, color: '#f59e0b' },
         { name: 'O/O', value: stats.outOfOrder, color: '#71717a' },
+        { name: 'Off Market', value: stats.offMarket, color: '#a855f7' },
       ]
     : [];
 
@@ -151,11 +157,13 @@ export default function DashboardPage() {
 
   const statCards = [
     { label: 'Total Rooms', value: stats?.totalRooms ?? 0, icon: BedDouble, color: 'text-primary', bg: 'bg-primary/10' },
-    { label: 'Dirty Rooms', value: stats?.dirty ?? 0, icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
-    { label: 'Clean Rooms', value: stats?.clean ?? 0, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-    { label: 'Inspected', value: stats?.inspected ?? 0, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-    { label: 'Occupied', value: stats?.occupiedCount ?? 0, icon: Users, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-    { label: 'Vacant', value: stats?.vacantCount ?? 0, icon: DoorOpen, color: 'text-slate-500', bg: 'bg-slate-500/10' },
+    { label: 'Vacant Dirty', value: stats?.vacantDirty ?? 0, icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
+    { label: 'Vacant Clean', value: stats?.vacantClean ?? 0, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+    { label: 'Vacant Inspected', value: stats?.vacantCleanInspected ?? 0, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { label: 'Occupied Clean', value: stats?.occupiedClean ?? 0, icon: Users, color: 'text-teal-500', bg: 'bg-teal-500/10' },
+    { label: 'Occupied Dirty', value: stats?.occupiedDirty ?? 0, icon: Users, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { label: 'Out Of Order', value: stats?.outOfOrder ?? 0, icon: DoorOpen, color: 'text-zinc-500', bg: 'bg-zinc-500/10' },
+    { label: 'Off Market', value: stats?.offMarket ?? 0, icon: DoorOpen, color: 'text-purple-500', bg: 'bg-purple-500/10' },
     { label: 'Pending Tasks', value: stats?.pendingAssignments ?? 0, icon: Clock, color: 'text-orange-500', bg: 'bg-orange-500/10' },
     { label: 'Completed', value: stats?.completedAssignments ?? 0, icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
   ];
@@ -188,7 +196,7 @@ export default function DashboardPage() {
                     {occupancyRate}%
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {stats?.dirty ?? 0} of {stats?.totalRooms ?? 0} rooms dirty
+                    {stats?.totalDirty ?? 0} of {stats?.totalRooms ?? 0} rooms dirty
                   </p>
                 </div>
               </div>
