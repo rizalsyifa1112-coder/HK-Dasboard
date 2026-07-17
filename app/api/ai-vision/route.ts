@@ -2,15 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, imageMime } = await req.json();
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(
+        { error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables, then redeploy.' },
+        { status: 500 }
+      );
+    }
 
+    const { imageBase64, imageMime } = await req.json();
     if (!imageBase64 || !imageMime) {
       return NextResponse.json({ error: 'Missing image data' }, { status: 400 });
     }
 
     const systemPrompt = `You are a hotel PMS (Property Management System) data extractor.
 Your job is to read a screenshot of a hotel PMS and extract room numbers with their housekeeping status.
-
 Map the PMS status text to exactly one of these system statuses:
 - dirty: room needs cleaning (Dirty, Vac. Dirty, Vacant Dirty)
 - clean: room is clean but not yet inspected (Vac. Clean Unchecked, Vacant Clean Unchecked, Clean)
@@ -18,7 +23,6 @@ Map the PMS status text to exactly one of these system statuses:
 - occupied: room is currently occupied by a guest (Occupied, Occupied Cleaned, Occupied Dirty)
 - vacant: room is vacant with no specific cleaning status (Vacant)
 - out_of_order: room is out of order (Out of Order, OOO, OO)
-
 IMPORTANT RULES:
 - Only extract rows that clearly have a room number (numeric like 301, 422, 508)
 - Ignore header rows, footer rows, and any rows without a clear room number
@@ -31,6 +35,7 @@ IMPORTANT RULES:
       headers: {
         'Content-Type': 'application/json',
         'anthropic-version': '2023-06-01',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
@@ -70,9 +75,17 @@ IMPORTANT RULES:
     const text = data.content
       ?.map((c: { type: string; text?: string }) => c.text ?? '')
       .join('') ?? '';
-
     const cleaned = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return NextResponse.json(
+        { error: 'AI response was not valid JSON. Try a clearer screenshot.' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ rooms: parsed });
   } catch (err) {
