@@ -60,9 +60,16 @@ const PMS_STATUS_MAP: Record<string, HousekeepingStatus> = {
   'vacant dirty': 'vacant_dirty',
   'vac dirty': 'vacant_dirty',
   'dirty': 'vacant_dirty',
-  'vac. clean unchecked': 'vacant_clean',
-  'vacant clean unchecked': 'vacant_clean',
-  'vac clean unchecked': 'vacant_clean',
+  'vac. clean unchecked': 'vacant_clean_unchecked',
+  'vacant clean unchecked': 'vacant_clean_unchecked',
+  'vac clean unchecked': 'vacant_clean_unchecked',
+  'vac. clean uncheck': 'vacant_clean_unchecked',
+  'vacant clean uncheck': 'vacant_clean_unchecked',
+  'vac clean uncheck': 'vacant_clean_unchecked',
+  'clean uncheck': 'vacant_clean_unchecked',
+  'clean unchecked': 'vacant_clean_unchecked',
+  'vac. clean': 'vacant_clean',
+  'vacant clean': 'vacant_clean',
   'clean': 'vacant_clean',
   'vacant': 'vacant_clean',
   'vac. clean checked': 'vacant_clean_inspected',
@@ -315,15 +322,15 @@ export default function AIVisionPage() {
       let fail = 0;
       for (const row of validRows) {
         const updates: Record<string, unknown> = { housekeeping_status: row.pmsStatus };
-        if (['vacant_clean', 'vacant_clean_inspected', 'occupied_clean'].includes(row.pmsStatus)) {
-          updates.last_cleaned_at = new Date().toISOString();
-        }
+        if (['vacant_clean_unchecked', 'vacant_clean', 'vacant_clean_inspected', 'occupied_clean'].includes(row.pmsStatus)) {
+  updates.last_cleaned_at = new Date().toISOString();
+}
         if (['occupied_clean', 'occupied_dirty', 'expected_departure'].includes(row.pmsStatus)) {
           updates.occupancy_status = 'occupied';
         }
-        if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsStatus)) {
-          updates.occupancy_status = 'vacant';
-        }
+       if (['vacant_dirty', 'vacant_clean_unchecked', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsStatus)) {
+  updates.occupancy_status = 'vacant';
+}
         const { error } = await supabase.from('rooms').update(updates).eq('id', row.dbRoomId);
         if (error) { fail++; } else { ok++; }
       }
