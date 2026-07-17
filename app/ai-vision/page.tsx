@@ -49,26 +49,29 @@ const STEPS = [
 const STATUS_VALUES = Object.keys(HOUSEKEEPING_STATUS_LABELS) as HousekeepingStatus[];
 
 const PMS_STATUS_MAP: Record<string, HousekeepingStatus> = {
-  'vac. clean unchecked': 'clean',
-  'vacant clean unchecked': 'clean',
-  'vac clean unchecked': 'clean',
-  'vac. dirty': 'dirty',
-  'vacant dirty': 'dirty',
-  'vac dirty': 'dirty',
-  'vac. clean checked': 'inspected',
-  'vacant clean checked': 'inspected',
-  'vac clean checked': 'inspected',
-  'occupied cleaned': 'occupied',
-  'occupied clean': 'occupied',
-  'occupied dirty': 'occupied',
-  'occupied': 'occupied',
+  'vac. dirty': 'vacant_dirty',
+  'vacant dirty': 'vacant_dirty',
+  'vac dirty': 'vacant_dirty',
+  'dirty': 'vacant_dirty',
+  'vac. clean unchecked': 'vacant_clean',
+  'vacant clean unchecked': 'vacant_clean',
+  'vac clean unchecked': 'vacant_clean',
+  'clean': 'vacant_clean',
+  'vacant': 'vacant_clean',
+  'vac. clean checked': 'vacant_clean_inspected',
+  'vacant clean checked': 'vacant_clean_inspected',
+  'vac clean checked': 'vacant_clean_inspected',
+  'inspected': 'vacant_clean_inspected',
+  'occupied cleaned': 'occupied_clean',
+  'occupied clean': 'occupied_clean',
+  'occupied dirty': 'occupied_dirty',
+  'occupied': 'occupied_dirty',
   'out of order': 'out_of_order',
   'oo': 'out_of_order',
   'ooo': 'out_of_order',
-  'dirty': 'dirty',
-  'clean': 'clean',
-  'inspected': 'inspected',
-  'vacant': 'vacant',
+  'off market': 'off_market',
+  'off_market': 'off_market',
+  'om': 'off_market',
 };
 
 export default function AIVisionPage() {
@@ -282,9 +285,14 @@ export default function AIVisionPage() {
       let fail = 0;
       for (const row of validRows) {
         const updates: Record<string, unknown> = { housekeeping_status: row.pmsStatus };
-        if (row.pmsStatus === 'clean' || row.pmsStatus === 'inspected') updates.last_cleaned_at = new Date().toISOString();
-        if (row.pmsStatus === 'occupied') updates.occupancy_status = 'occupied';
-        if (row.pmsStatus === 'vacant') updates.occupancy_status = 'vacant';
+        if (['vacant_clean', 'vacant_clean_inspected', 'occupied_clean'].includes(row.pmsStatus)) {
+  updates.last_cleaned_at = new Date().toISOString();
+}
+if (['occupied_clean', 'occupied_dirty'].includes(row.pmsStatus)) {
+  updates.occupancy_status = 'occupied';
+}
+if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsStatus)) {
+  updates.occupancy_status = 'vacant';
         const { error } = await supabase.from('rooms').update(updates).eq('id', row.dbRoomId);
         if (error) { fail++; } else { ok++; }
       }
