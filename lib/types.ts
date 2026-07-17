@@ -2,6 +2,7 @@ export type UserRole = 'admin' | 'supervisor' | 'order_taker' | 'housekeeping';
 
 export type HousekeepingStatus =
   | 'vacant_dirty'
+  | 'vacant_clean_unchecked'
   | 'vacant_clean'
   | 'vacant_clean_inspected'
   | 'occupied_clean'
