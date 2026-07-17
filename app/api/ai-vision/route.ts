@@ -15,7 +15,8 @@ export async function POST(req: NextRequest) {
 Your job is to read a screenshot of a hotel PMS and extract room numbers with their housekeeping status.
 Map the PMS status text to exactly one of these system statuses:
 - vacant_dirty: room is vacant and needs cleaning (Dirty, Vac. Dirty, Vacant Dirty)
-- vacant_clean: room is vacant, clean but not yet inspected (Vac. Clean Unchecked, Vacant Clean Unchecked, Clean)
+- vacant_clean_unchecked: room has been cleaned but not yet verified (Vac. Clean Unchecked, Vacant Clean Unchecked, Vac Clean Uncheck, Clean Uncheck)
+- vacant_clean: room is vacant and clean (Vac. Clean, Vacant Clean, Clean)
 - vacant_clean_inspected: room is vacant, clean and inspected/checked (Vac. Clean Checked, Vacant Clean Checked, Inspected, Vac. Clean Checked AA)
 - occupied_clean: room is occupied by a guest and clean (Occupied Cleaned, Occupied Clean)
 - occupied_dirty: room is occupied by a guest and needs cleaning (Occupied Dirty, Occupied)
