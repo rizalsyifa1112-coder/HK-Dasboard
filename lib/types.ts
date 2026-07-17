@@ -6,6 +6,7 @@ export type HousekeepingStatus =
   | 'vacant_clean_inspected'
   | 'occupied_clean'
   | 'occupied_dirty'
+  | 'expected_departure'
   | 'out_of_order'
   | 'off_market';
 
@@ -347,6 +348,7 @@ export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
   vacant_clean_inspected: 'Vacant Clean Inspected',
   occupied_clean: 'Occupied Clean',
   occupied_dirty: 'Occupied Dirty',
+  expected_departure: 'Expected Departure',
   out_of_order: 'Out Of Order',
   off_market: 'Off Market',
 };
@@ -357,6 +359,7 @@ export const HOUSEKEEPING_STATUS_COLORS: Record<HousekeepingStatus, string> = {
   vacant_clean_inspected: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   occupied_clean: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30',
   occupied_dirty: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  expected_departure: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
   out_of_order: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
   off_market: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30',
 };
