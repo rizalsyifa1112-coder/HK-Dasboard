@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json(
-        { error: 'ANTHROPIC_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables, then redeploy.' },
+        { error: 'GEMINI_API_KEY is not set on the server. Add it in Vercel → Settings → Environment Variables, then redeploy.' },
         { status: 500 }
       );
     }
@@ -30,51 +30,37 @@ IMPORTANT RULES:
 - Return ONLY a JSON array, no explanation, no markdown, no backticks
 - Format: [{"roomNumber":"301","status":"clean"},{"roomNumber":"302","status":"occupied"}]`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: imageMime,
-                  data: imageBase64,
-                },
-              },
-              {
-                type: 'text',
-                text: 'Please extract all room numbers and their housekeeping statuses from this PMS screenshot. Return only a JSON array as specified.',
-              },
-            ],
-          },
-        ],
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { inlineData: { mimeType: imageMime, data: imageBase64 } },
+                { text: 'Please extract all room numbers and their housekeeping statuses from this PMS screenshot. Return only a JSON array as specified.' },
+              ],
+            },
+          ],
+          generationConfig: { temperature: 0 },
+        }),
+      }
+    );
 
     if (!response.ok) {
       const err = await response.json();
       return NextResponse.json(
-        { error: err?.error?.message ?? 'Claude API error' },
+        { error: err?.error?.message ?? 'Gemini API error' },
         { status: response.status }
       );
     }
 
     const data = await response.json();
-    const text = data.content
-      ?.map((c: { type: string; text?: string }) => c.text ?? '')
-      .join('') ?? '';
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     const cleaned = text.replace(/```json|```/g, '').trim();
 
     let parsed;
