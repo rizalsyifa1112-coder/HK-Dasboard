@@ -25,7 +25,7 @@ import {
 import {
   Upload, Image as ImageIcon, ScanEye, CheckCircle2, XCircle,
   RefreshCw, Loader2, ShieldAlert, FileCheck2, Database, Pencil,
-  AlertTriangle, Sparkles, ArrowRight, RotateCcw, Brain,
+  AlertTriangle, ArrowRight, RotateCcw, Brain,
 } from 'lucide-react';
 
 type DetectedRow = {
@@ -48,9 +48,7 @@ const STEPS = [
 
 const STATUS_VALUES = Object.keys(HOUSEKEEPING_STATUS_LABELS) as HousekeepingStatus[];
 
-// Maps common PMS status text to our system status
 const PMS_STATUS_MAP: Record<string, HousekeepingStatus> = {
-  // Vacant variants
   'vac. clean unchecked': 'clean',
   'vacant clean unchecked': 'clean',
   'vac clean unchecked': 'clean',
@@ -60,16 +58,13 @@ const PMS_STATUS_MAP: Record<string, HousekeepingStatus> = {
   'vac. clean checked': 'inspected',
   'vacant clean checked': 'inspected',
   'vac clean checked': 'inspected',
-  // Occupied variants
   'occupied cleaned': 'occupied',
   'occupied clean': 'occupied',
   'occupied dirty': 'occupied',
   'occupied': 'occupied',
-  // Out of order
   'out of order': 'out_of_order',
   'oo': 'out_of_order',
   'ooo': 'out_of_order',
-  // Direct
   'dirty': 'dirty',
   'clean': 'clean',
   'inspected': 'inspected',
@@ -82,7 +77,6 @@ export default function AIVisionPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string>('image/jpeg');
-
   const [currentStep, setCurrentStep] = useState(1);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>('');
@@ -93,7 +87,7 @@ export default function AIVisionPage() {
   const [loadingDb, setLoadingDb] = useState(true);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
-  const [aiMode, setAiMode] = useState(false); // true = used AI to read image
+  const [aiMode, setAiMode] = useState(false);
 
   const canApprove = canApproveAI(profile?.role);
 
@@ -136,7 +130,6 @@ export default function AIVisionPage() {
     reader.onload = () => {
       const result = reader.result as string;
       setImagePreview(result);
-      // Extract base64 data (remove data:image/xxx;base64, prefix)
       const base64 = result.split(',')[1];
       setImageBase64(base64);
     };
@@ -155,75 +148,29 @@ export default function AIVisionPage() {
     if (file) processFile(file);
   };
 
-  // Call Claude API to read the PMS screenshot
+  // Call server API route (avoids CORS — browser cannot call Anthropic directly)
   const readImageWithAI = async (): Promise<{ roomNumber: string; status: HousekeepingStatus }[]> => {
     if (!imageBase64) return [];
 
-    const systemPrompt = `You are a hotel PMS (Property Management System) data extractor.
-Your job is to read a screenshot of a hotel PMS and extract room numbers with their housekeeping status.
-
-Map the PMS status text to exactly one of these system statuses:
-- dirty: room needs cleaning (Dirty, Vac. Dirty, Vacant Dirty)
-- clean: room is clean but not yet inspected (Vac. Clean Unchecked, Vacant Clean Unchecked, Clean)
-- inspected: room is clean and inspected/checked (Vac. Clean Checked, Vacant Clean Checked, Inspected)
-- occupied: room is currently occupied by a guest (Occupied, Occupied Cleaned, Occupied Dirty)
-- vacant: room is vacant with no specific cleaning status (Vacant)
-- out_of_order: room is out of order (Out of Order, OOO, OO)
-
-IMPORTANT RULES:
-- Only extract rows that clearly have a room number (numeric or alphanumeric like 301, 4A01)
-- Ignore header rows, footer rows, and any rows without a clear room number
-- If the status is ambiguous, map it to the closest match from the list above
-- Return ONLY a JSON array, no explanation, no markdown, no backticks
-- Format: [{"roomNumber":"301","status":"clean"},{"roomNumber":"302","status":"occupied"}]`;
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('/api/ai-vision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: imageMime as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-                  data: imageBase64,
-                },
-              },
-              {
-                type: 'text',
-                text: 'Please extract all room numbers and their housekeeping statuses from this PMS screenshot. Return only a JSON array as specified.',
-              },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify({ imageBase64, imageMime }),
     });
 
     if (!response.ok) {
       const err = await response.json();
-      throw new Error(err?.error?.message ?? 'AI API error');
+      throw new Error(err?.error ?? 'AI Vision API error');
     }
 
     const data = await response.json();
-    const text = data.content?.map((c: { type: string; text?: string }) => c.text ?? '').join('') ?? '';
-
-    // Parse JSON response
-    const cleaned = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(cleaned) as { roomNumber: string; status: string }[];
+    const parsed = data.rooms as { roomNumber: string; status: string }[];
 
     return parsed
       .filter((r) => r.roomNumber && STATUS_VALUES.includes(r.status as HousekeepingStatus))
       .map((r) => ({ roomNumber: String(r.roomNumber), status: r.status as HousekeepingStatus }));
   };
 
-  // Parse manual text area
   const parseManualText = (): { roomNumber: string; status: HousekeepingStatus }[] => {
     const lines = manualText.split('\n').map((l) => l.trim()).filter(Boolean);
     const parsed: { roomNumber: string; status: HousekeepingStatus }[] = [];
@@ -231,11 +178,8 @@ IMPORTANT RULES:
       const parts = line.split(/[\s,:|\t]+| - /).filter(Boolean);
       if (parts.length < 2) continue;
       const roomNumber = parts[0];
-      // Join remaining parts as status (handles multi-word statuses like "out_of_order")
       const statusRaw = parts.slice(1).join(' ').toLowerCase().trim();
-      // Try direct match first
       let status = STATUS_VALUES.find((s) => s === statusRaw);
-      // Then try PMS map
       if (!status) status = PMS_STATUS_MAP[statusRaw];
       if (!status) continue;
       parsed.push({ roomNumber, status });
@@ -250,7 +194,6 @@ IMPORTANT RULES:
     try {
       let detected: { roomNumber: string; status: HousekeepingStatus }[] = [];
 
-      // Priority 1: if image uploaded, use AI to read it
       if (imageBase64) {
         try {
           toast({ title: 'Reading image...', description: 'Claude AI is analyzing your PMS screenshot' });
@@ -259,7 +202,7 @@ IMPORTANT RULES:
           if (detected.length === 0) {
             toast({
               title: 'No rooms detected',
-              description: 'AI could not find room data in the image. Try the manual text box below.',
+              description: 'AI could not find room data. Try the manual text box below.',
               variant: 'destructive',
             });
           }
@@ -267,19 +210,17 @@ IMPORTANT RULES:
           console.error('AI reading failed:', aiErr);
           toast({
             title: 'AI reading failed',
-            description: 'Could not read image automatically. Please use the manual text box.',
+            description: String(aiErr instanceof Error ? aiErr.message : aiErr),
             variant: 'destructive',
           });
         }
       }
 
-      // Priority 2: manual text (fallback or override)
       if (detected.length === 0 && manualText.trim()) {
         detected = parseManualText();
         setAiMode(false);
       }
 
-      // Priority 3: demo data from DB
       if (detected.length === 0 && dbRooms.length > 0) {
         const sample = dbRooms.slice(0, Math.min(10, dbRooms.length));
         detected = sample.map((r) => ({
@@ -289,16 +230,11 @@ IMPORTANT RULES:
       }
 
       if (detected.length === 0) {
-        toast({
-          title: 'Nothing detected',
-          description: 'Upload an image or paste room data manually.',
-          variant: 'destructive',
-        });
+        toast({ title: 'Nothing detected', description: 'Upload an image or paste room data manually.', variant: 'destructive' });
         setProcessing(false);
         return;
       }
 
-      // Build comparison rows
       const rows: DetectedRow[] = detected.map((d) => {
         const dbRoom = dbRooms.find((r) => r.number === d.roomNumber);
         return {
@@ -328,8 +264,7 @@ IMPORTANT RULES:
     setDetectedRows((prev) =>
       prev.map((row, i) => {
         if (i !== index) return row;
-        const matched = row.dbStatus !== null && row.dbStatus === status;
-        return { ...row, pmsStatus: status, matched };
+        return { ...row, pmsStatus: status, matched: row.dbStatus !== null && row.dbStatus === status };
       })
     );
   };
@@ -347,15 +282,12 @@ IMPORTANT RULES:
       let fail = 0;
       for (const row of validRows) {
         const updates: Record<string, unknown> = { housekeeping_status: row.pmsStatus };
-        if (row.pmsStatus === 'clean' || row.pmsStatus === 'inspected') {
-          updates.last_cleaned_at = new Date().toISOString();
-        }
+        if (row.pmsStatus === 'clean' || row.pmsStatus === 'inspected') updates.last_cleaned_at = new Date().toISOString();
         if (row.pmsStatus === 'occupied') updates.occupancy_status = 'occupied';
         if (row.pmsStatus === 'vacant') updates.occupancy_status = 'vacant';
         const { error } = await supabase.from('rooms').update(updates).eq('id', row.dbRoomId);
         if (error) { fail++; } else { ok++; }
       }
-
       await supabase.from('activity_logs').insert({
         user_id: profile?.id ?? null,
         user_name: profile?.full_name ?? null,
@@ -363,7 +295,6 @@ IMPORTANT RULES:
         entity_type: 'rooms',
         details: { rooms_updated: ok, rooms_failed: fail, source: fileName || 'manual', ai_read: aiMode },
       });
-
       if (fail > 0 && ok === 0) {
         toast({ title: 'Update failed', description: `Failed to update ${fail} rooms.`, variant: 'destructive' });
       } else {
@@ -400,22 +331,18 @@ IMPORTANT RULES:
         }
       />
 
-      {/* AI mode info */}
       <div className="flex items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm">
         <Brain className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
         <div>
-          <p className="font-medium text-blue-700 dark:text-blue-400">
-            AI Vision powered by Claude
-          </p>
+          <p className="font-medium text-blue-700 dark:text-blue-400">AI Vision powered by Claude</p>
           <p className="text-muted-foreground mt-0.5">
-            Upload your PMS screenshot and click <strong>Process Screenshot</strong> — Claude AI will automatically
-            read all room numbers and statuses, then map them to the correct system format.
+            Upload your PMS screenshot and click <strong>Process Screenshot</strong> — Claude AI will
+            automatically read all room numbers and statuses, then map them to the correct system format.
             No manual typing needed.
           </p>
         </div>
       </div>
 
-      {/* Step indicator */}
       <div className="flex flex-wrap items-center gap-1.5">
         {STEPS.map((step, i) => {
           const Icon = step.icon;
@@ -448,7 +375,6 @@ IMPORTANT RULES:
         })}
       </div>
 
-      {/* Step 1: Upload */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -486,7 +412,6 @@ IMPORTANT RULES:
         </CardContent>
       </Card>
 
-      {/* Steps 2-3: Process */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -509,7 +434,7 @@ IMPORTANT RULES:
               className="font-mono text-sm"
             />
             <p className="text-xs text-muted-foreground">
-              Valid statuses: {STATUS_VALUES.join(', ')}. Also accepts PMS formats like "Vac. Clean Unchecked", "Occupied Cleaned", etc.
+              Valid statuses: {STATUS_VALUES.join(', ')}. Also accepts PMS formats like "Vac. Clean Unchecked".
             </p>
           </div>
           <Button onClick={runDetection} disabled={processing || loadingDb} size="lg">
@@ -522,7 +447,6 @@ IMPORTANT RULES:
         </CardContent>
       </Card>
 
-      {/* Steps 4-5: Comparison */}
       {detectedRows.length > 0 && (
         <Card>
           <CardHeader>
@@ -547,7 +471,6 @@ IMPORTANT RULES:
                 </Badge>
               )}
             </div>
-
             <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -605,7 +528,6 @@ IMPORTANT RULES:
         </Card>
       )}
 
-      {/* Step 6: Approve */}
       {detectedRows.length > 0 && !applied && (
         <Card>
           <CardHeader>
@@ -613,7 +535,7 @@ IMPORTANT RULES:
               <ShieldAlert className="h-4 w-4" /> Step 6 — Supervisor / Admin Approval
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
             {canApprove ? (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground">
@@ -632,9 +554,7 @@ IMPORTANT RULES:
                 <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
                 <div>
                   <p className="font-medium text-amber-700 dark:text-amber-400">Approval required</p>
-                  <p className="text-muted-foreground mt-0.5">
-                    Only supervisors and administrators can approve AI Vision syncs.
-                  </p>
+                  <p className="text-muted-foreground mt-0.5">Only supervisors and administrators can approve AI Vision syncs.</p>
                 </div>
               </div>
             )}
@@ -642,7 +562,6 @@ IMPORTANT RULES:
         </Card>
       )}
 
-      {/* Step 7: Result */}
       {applied && (
         <Card>
           <CardHeader>
@@ -659,7 +578,6 @@ IMPORTANT RULES:
                 <p className="font-medium">Sync complete</p>
                 <p className="text-sm text-muted-foreground mt-1">
                   {detectedRows.filter((r) => r.dbRoomId).length} rooms were updated from the PMS screenshot.
-                  The room status board now reflects the latest PMS data.
                 </p>
                 <Button variant="outline" size="sm" className="mt-3" onClick={reset}>
                   <RotateCcw className="mr-2 h-4 w-4" /> Start New Sync
