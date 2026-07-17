@@ -75,17 +75,28 @@ export default function RoomStatusPage() {
     }))
     .filter((g) => g.rooms.length > 0);
 
+  // ===== UPDATED: handleStatusChange now includes vacant_clean_unchecked =====
   const handleStatusChange = async (room: Room, newStatus: HousekeepingStatus) => {
     setUpdating(true);
     try {
       const updates: Record<string, unknown> = {
         housekeeping_status: newStatus,
-        last_cleaned_at: (newStatus === 'vacant_clean' || newStatus === 'vacant_clean_inspected' || newStatus === 'occupied_clean')
+        last_cleaned_at: (
+          newStatus === 'vacant_clean_unchecked' ||
+          newStatus === 'vacant_clean' ||
+          newStatus === 'vacant_clean_inspected' ||
+          newStatus === 'occupied_clean'
+        )
           ? new Date().toISOString()
           : room.last_cleaned_at,
       };
       if (newStatus === 'occupied_clean' || newStatus === 'occupied_dirty' || newStatus === 'expected_departure') updates.occupancy_status = 'occupied';
-      if (newStatus === 'vacant_dirty' || newStatus === 'vacant_clean' || newStatus === 'vacant_clean_inspected') updates.occupancy_status = 'vacant';
+      if (
+        newStatus === 'vacant_dirty' ||
+        newStatus === 'vacant_clean_unchecked' ||
+        newStatus === 'vacant_clean' ||
+        newStatus === 'vacant_clean_inspected'
+      ) updates.occupancy_status = 'vacant';
 
       const { error } = await supabase.from('rooms').update(updates).eq('id', room.id);
       if (error) throw error;
@@ -99,16 +110,18 @@ export default function RoomStatusPage() {
     }
   };
 
+  // ===== UPDATED: statusCounts now includes vacant_clean_unchecked =====
   const statusCounts: Record<HousekeepingStatus, number> = {
-  vacant_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_dirty').length,
-  vacant_clean: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean').length,
-  vacant_clean_inspected: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean_inspected').length,
-  occupied_clean: filteredRooms.filter((r) => r.housekeeping_status === 'occupied_clean').length,
-  occupied_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'occupied_dirty').length,
-  expected_departure: filteredRooms.filter((r) => r.housekeeping_status === 'expected_departure').length,
-  out_of_order: filteredRooms.filter((r) => r.housekeeping_status === 'out_of_order').length,
-  off_market: filteredRooms.filter((r) => r.housekeeping_status === 'off_market').length,
-};
+    vacant_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_dirty').length,
+    vacant_clean_unchecked: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean_unchecked').length,
+    vacant_clean: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean').length,
+    vacant_clean_inspected: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean_inspected').length,
+    occupied_clean: filteredRooms.filter((r) => r.housekeeping_status === 'occupied_clean').length,
+    occupied_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'occupied_dirty').length,
+    expected_departure: filteredRooms.filter((r) => r.housekeeping_status === 'expected_departure').length,
+    out_of_order: filteredRooms.filter((r) => r.housekeeping_status === 'out_of_order').length,
+    off_market: filteredRooms.filter((r) => r.housekeeping_status === 'off_market').length,
+  };
 
   return (
     <div className="p-4 md:p-6 space-y-6">
