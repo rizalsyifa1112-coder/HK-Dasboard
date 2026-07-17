@@ -101,7 +101,11 @@ export default function AssignmentDetailPage() {
     try {
       const { error } = await supabase
         .from('assignments')
-        .update({ status: 'in_progress', started_at: new Date().toISOString() })
+        .update({
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+          hk_status_in: assignment.room?.housekeeping_status ?? null, // ⬅️ BARU: snapshot status saat masuk kamar
+        })
         .eq('id', assignment.id);
       if (error) throw error;
       toast({ title: 'Started', description: 'Cleaning started — timer is running' });
@@ -150,9 +154,29 @@ export default function AssignmentDetailPage() {
 
       const { error: finishError } = await supabase
         .from('assignments')
-        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          hk_status_final: assignment.room?.housekeeping_status ?? null, // ⬅️ BARU: snapshot status akhir
+        })
         .eq('id', assignment.id);
       if (finishError) throw finishError;
+
+      // ⬅️ BARU: trigger sync ke Google Sheets setelah assignment selesai
+      try {
+        await fetch('/api/sync-assignment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignmentId: assignment.id }),
+        });
+      } catch (syncErr) {
+        console.error('Sync to sheet failed:', syncErr);
+        toast({
+          title: 'Sync gagal',
+          description: 'Data tersimpan, tapi sync ke spreadsheet gagal. Coba Sync manual nanti.',
+          variant: 'destructive',
+        });
+      }
 
       toast({ title: 'Completed', description: 'Room cleaning finished and usage recorded' });
       router.push('/assignments');
