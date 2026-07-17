@@ -231,11 +231,11 @@ export default function AssignmentDetailPage() {
             <div>
               <p className="text-sm text-muted-foreground">Room Status</p>
               <Badge
-                variant="outline"
-                className={cn('text-xs mt-1', HOUSEKEEPING_STATUS_COLORS[assignment.room?.housekeeping_status ?? 'clean'])}
-              >
-                {HOUSEKEEPING_STATUS_LABELS[assignment.room?.housekeeping_status ?? 'clean']}
-              </Badge>
+  variant="outline"
+  className={cn('text-xs mt-1', HOUSEKEEPING_STATUS_COLORS[assignment.room?.housekeeping_status ?? 'clean'])}
+>
+  {HOUSEKEEPING_STATUS_LABELS[assignment.room?.housekeeping_status ?? 'clean']}
+</Badge>
             </div>
           </div>
 
