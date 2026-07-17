@@ -1,10 +1,10 @@
-// Kolom A-G statis (NO, NO OF ROOM, FO, HK1, HK2, TIME IN, TIME OUT)
+// Kolom A-G statis: NO, NO OF ROOM, FO, HK1, HK2, TIME IN, TIME OUT
 // Kolom H-W: 8 item linen, masing-masing IN lalu OUT
 export const LINEN_COLUMN_ORDER = [
   'Sheet Double',
   'Sheet Single',
-  'Duvet Cover',        // varian pertama (L-M)
-  'Duvet Cover Single',  // varian kedua (N-O)
+  'Duvet Cover',
+  'Duvet Cover Single',
   'Bath Towel',
   'Hand Towel',
   'Bath Mat',
