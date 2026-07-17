@@ -25,7 +25,7 @@ import {
 import {
   Upload, Image as ImageIcon, ScanEye, CheckCircle2, XCircle,
   RefreshCw, Loader2, ShieldAlert, FileCheck2, Database, Pencil,
-  AlertTriangle, ArrowRight, RotateCcw, Brain,
+  AlertTriangle, ArrowRight, RotateCcw, Brain, X,
 } from 'lucide-react';
 
 type DetectedRow = {
@@ -34,6 +34,13 @@ type DetectedRow = {
   dbStatus: HousekeepingStatus | null;
   dbRoomId: string | null;
   matched: boolean;
+};
+
+type UploadedImage = {
+  base64: string;
+  mime: string;
+  name: string;
+  preview: string;
 };
 
 const STEPS = [
@@ -82,11 +89,8 @@ export default function AIVisionPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [imageMime, setImageMime] = useState<string>('image/jpeg');
+  const [images, setImages] = useState<UploadedImage[]>([]);
   const [currentStep, setCurrentStep] = useState(1);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string>('');
   const [manualText, setManualText] = useState('');
   const [processing, setProcessing] = useState(false);
   const [detectedRows, setDetectedRows] = useState<DetectedRow[]>([]);
@@ -116,9 +120,7 @@ export default function AIVisionPage() {
 
   const reset = () => {
     setCurrentStep(1);
-    setImagePreview(null);
-    setImageBase64(null);
-    setFileName('');
+    setImages([]);
     setManualText('');
     setDetectedRows([]);
     setApplied(false);
@@ -126,56 +128,81 @@ export default function AIVisionPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const processFile = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      toast({ title: 'Invalid file', description: 'Please upload an image file (PNG, JPG, etc.)', variant: 'destructive' });
+  const readFileAsBase64 = (file: File): Promise<UploadedImage> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve({ base64, mime: file.type, name: file.name, preview: result });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const processFiles = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0) {
+      toast({ title: 'Invalid file', description: 'Please upload image files (PNG, JPG, etc.)', variant: 'destructive' });
       return;
     }
-    setFileName(file.name);
-    setImageMime(file.type);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      setImagePreview(result);
-      const base64 = result.split(',')[1];
-      setImageBase64(base64);
-    };
-    reader.readAsDataURL(file);
-    setApplied(false);
+    try {
+      const uploaded = await Promise.all(files.map(readFileAsBase64));
+      setImages((prev) => [...prev, ...uploaded]);
+      setApplied(false);
+    } catch (err) {
+      console.error('Error reading files:', err);
+      toast({ title: 'Error', description: 'Failed to read one or more images', variant: 'destructive' });
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
+    const files = e.target.files;
+    if (files && files.length > 0) processFiles(files);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) processFiles(files);
   };
 
-  // Call server API route (avoids CORS — browser cannot call Gemini directly)
-  const readImageWithAI = async (): Promise<{ roomNumber: string; status: HousekeepingStatus }[]> => {
-    if (!imageBase64) return [];
+  const removeImage = (index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+    setApplied(false);
+  };
 
-    const response = await fetch('/api/ai-vision', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64, imageMime }),
-    });
+  // Call server API route for each uploaded image, then merge results
+  const readImagesWithAI = async (): Promise<{ roomNumber: string; status: HousekeepingStatus }[]> => {
+    if (images.length === 0) return [];
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err?.error ?? 'AI Vision API error');
+    const merged = new Map<string, HousekeepingStatus>();
+
+    for (const img of images) {
+      const response = await fetch('/api/ai-vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: img.base64, imageMime: img.mime }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(`${img.name}: ${err?.error ?? 'AI Vision API error'}`);
+      }
+
+      const data = await response.json();
+      const parsed = data.rooms as { roomNumber: string; status: string }[];
+
+      for (const r of parsed) {
+        if (r.roomNumber && STATUS_VALUES.includes(r.status as HousekeepingStatus)) {
+          // Later images override earlier ones for the same room number
+          merged.set(String(r.roomNumber), r.status as HousekeepingStatus);
+        }
+      }
     }
 
-    const data = await response.json();
-    const parsed = data.rooms as { roomNumber: string; status: string }[];
-
-    return parsed
-      .filter((r) => r.roomNumber && STATUS_VALUES.includes(r.status as HousekeepingStatus))
-      .map((r) => ({ roomNumber: String(r.roomNumber), status: r.status as HousekeepingStatus }));
+    return Array.from(merged.entries()).map(([roomNumber, status]) => ({ roomNumber, status }));
   };
 
   const parseManualText = (): { roomNumber: string; status: HousekeepingStatus }[] => {
@@ -201,10 +228,13 @@ export default function AIVisionPage() {
     try {
       let detected: { roomNumber: string; status: HousekeepingStatus }[] = [];
 
-      if (imageBase64) {
+      if (images.length > 0) {
         try {
-          toast({ title: 'Reading image...', description: 'AI is analyzing your PMS screenshot' });
-          detected = await readImageWithAI();
+          toast({
+            title: 'Reading images...',
+            description: `AI is analyzing ${images.length} PMS screenshot${images.length > 1 ? 's' : ''}`,
+          });
+          detected = await readImagesWithAI();
           setAiMode(true);
           if (detected.length === 0) {
             toast({
@@ -231,7 +261,7 @@ export default function AIVisionPage() {
       if (detected.length === 0) {
         toast({
           title: 'Nothing detected',
-          description: 'AI could not read the screenshot and no manual data was entered. Please check your Gemini API key/quota, or try the manual text box.',
+          description: 'AI could not read the screenshot(s) and no manual data was entered. Please check your Gemini API key/quota, or try the manual text box.',
           variant: 'destructive',
         });
         setProcessing(false);
@@ -253,11 +283,11 @@ export default function AIVisionPage() {
       setCurrentStep(6);
       toast({
         title: 'Detection complete',
-        description: `${rows.length} rooms read from PMS screenshot${aiMode ? ' by AI' : ''}.`,
+        description: `${rows.length} rooms read from ${images.length > 0 ? `${images.length} screenshot${images.length > 1 ? 's' : ''}` : 'manual input'}${aiMode ? ' by AI' : ''}.`,
       });
     } catch (err) {
       console.error('Detection error:', err);
-      toast({ title: 'Error', description: 'Failed to process screenshot', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to process screenshot(s)', variant: 'destructive' });
     } finally {
       setProcessing(false);
     }
@@ -288,7 +318,7 @@ export default function AIVisionPage() {
         if (['vacant_clean', 'vacant_clean_inspected', 'occupied_clean'].includes(row.pmsStatus)) {
           updates.last_cleaned_at = new Date().toISOString();
         }
-        if (['occupied_clean', 'occupied_dirty'].includes(row.pmsStatus)) {
+        if (['occupied_clean', 'occupied_dirty', 'expected_departure'].includes(row.pmsStatus)) {
           updates.occupancy_status = 'occupied';
         }
         if (['vacant_dirty', 'vacant_clean', 'vacant_clean_inspected'].includes(row.pmsStatus)) {
@@ -302,7 +332,7 @@ export default function AIVisionPage() {
         user_name: profile?.full_name ?? null,
         action: 'ai_vision_sync',
         entity_type: 'rooms',
-        details: { rooms_updated: ok, rooms_failed: fail, source: fileName || 'manual', ai_read: aiMode },
+        details: { rooms_updated: ok, rooms_failed: fail, source: images.map((i) => i.name).join(', ') || 'manual', ai_read: aiMode },
       });
       if (fail > 0 && ok === 0) {
         toast({ title: 'Update failed', description: `Failed to update ${fail} rooms.`, variant: 'destructive' });
@@ -327,7 +357,7 @@ export default function AIVisionPage() {
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
         title="AI Vision OCR"
-        description="Upload a PMS screenshot — AI will automatically read and sync room statuses"
+        description="Upload one or more PMS screenshots — AI will automatically read and sync room statuses"
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={fetchDbRooms} disabled={loadingDb}>
@@ -345,9 +375,9 @@ export default function AIVisionPage() {
         <div>
           <p className="font-medium text-blue-700 dark:text-blue-400">AI Vision OCR</p>
           <p className="text-muted-foreground mt-0.5">
-            Upload your PMS screenshot and click <strong>Process Screenshot</strong> — AI will
-            automatically read all room numbers and statuses, then map them to the correct system format.
-            No manual typing needed.
+            Upload one or more PMS screenshots and click <strong>Process Screenshot</strong> — AI will
+            automatically read all room numbers and statuses across every image, then map them to the
+            correct system format. No manual typing needed.
           </p>
         </div>
       </div>
@@ -387,7 +417,7 @@ export default function AIVisionPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Upload className="h-4 w-4" /> Step 1 — Upload PMS Screenshot
+            <Upload className="h-4 w-4" /> Step 1 — Upload PMS Screenshot(s)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -397,25 +427,43 @@ export default function AIVisionPage() {
             onClick={() => fileInputRef.current?.click()}
             className={cn(
               'flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-6 text-center cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/30',
-              imagePreview && 'border-solid'
+              images.length > 0 && 'border-solid'
             )}
           >
-            {imagePreview ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imagePreview} alt="PMS screenshot preview" className="max-h-64 rounded-md object-contain" />
+            {images.length > 0 ? (
+              <div className="flex flex-wrap gap-3 justify-center">
+                {images.map((img, i) => (
+                  <div key={i} className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.preview} alt={img.name} className="h-32 rounded-md object-contain border border-border" />
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeImage(i); }}
+                      className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-90 hover:opacity-100"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <p className="text-[10px] text-muted-foreground mt-1 max-w-[128px] truncate">{img.name}</p>
+                  </div>
+                ))}
+                <div className="flex flex-col items-center justify-center h-32 w-32 rounded-md border-2 border-dashed border-border text-muted-foreground">
+                  <ImageIcon className="h-6 w-6 mb-1" />
+                  <span className="text-[10px]">Add more</span>
+                </div>
+              </div>
             ) : (
               <>
                 <ImageIcon className="h-10 w-10 text-muted-foreground mb-2" />
-                <p className="text-sm font-medium">Drag & drop a screenshot here</p>
-                <p className="text-xs text-muted-foreground mt-1">or click to browse — PNG, JPG, WEBP</p>
+                <p className="text-sm font-medium">Drag & drop one or more screenshots here</p>
+                <p className="text-xs text-muted-foreground mt-1">or click to browse — PNG, JPG, WEBP (multiple files supported)</p>
               </>
             )}
           </div>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-          {fileName && (
+          <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
+          {images.length > 0 && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <FileCheck2 className="h-4 w-4 text-emerald-500" />
-              <span className="font-mono">{fileName}</span>
+              <span>{images.length} image{images.length > 1 ? 's' : ''} ready</span>
             </div>
           )}
         </CardContent>
@@ -424,12 +472,12 @@ export default function AIVisionPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Brain className="h-4 w-4" /> Steps 2 & 3 — AI reads your PMS screenshot
+            <Brain className="h-4 w-4" /> Steps 2 & 3 — AI reads your PMS screenshot(s)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border border-muted bg-muted/30 p-3 text-sm text-muted-foreground">
-            <p>If you have uploaded an image above, click <strong>Process Screenshot</strong> — AI will read it automatically.</p>
+            <p>If you have uploaded image(s) above, click <strong>Process Screenshot</strong> — AI will read all of them automatically and merge the results.</p>
             <p className="mt-1">Or paste room data manually below as fallback (one per line: <span className="font-mono">roomNumber status</span>):</p>
           </div>
           <div className="space-y-1.5">
@@ -450,7 +498,7 @@ export default function AIVisionPage() {
             {processing ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reading with AI…</>
             ) : (
-              <><Brain className="mr-2 h-4 w-4" /> Process Screenshot</>
+              <><Brain className="mr-2 h-4 w-4" /> Process Screenshot{images.length > 1 ? 's' : ''}</>
             )}
           </Button>
         </CardContent>
@@ -586,7 +634,7 @@ export default function AIVisionPage() {
               <div>
                 <p className="font-medium">Sync complete</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {detectedRows.filter((r) => r.dbRoomId).length} rooms were updated from the PMS screenshot.
+                  {detectedRows.filter((r) => r.dbRoomId).length} rooms were updated from the PMS screenshot(s).
                 </p>
                 <Button variant="outline" size="sm" className="mt-3" onClick={reset}>
                   <RotateCcw className="mr-2 h-4 w-4" /> Start New Sync
