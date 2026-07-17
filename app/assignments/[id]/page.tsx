@@ -22,6 +22,9 @@ import {
   type AssignmentAmenityUsage, type AssignmentLinenUsage,
 } from '@/lib/types';
 
+// ⬅️ BARU: tipe untuk qty in/out per linen item
+type LinenQtyMap = Record<string, { in: number; out: number }>;
+
 export default function AssignmentDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -33,7 +36,7 @@ export default function AssignmentDetailPage() {
   const [amenities, setAmenities] = useState<Amenity[]>([]);
   const [linenItems, setLinenItems] = useState<LinenInventory[]>([]);
   const [amenityQty, setAmenityQty] = useState<Record<string, number>>({});
-  const [linenQty, setLinenQty] = useState<Record<string, number>>({});
+  const [linenQty, setLinenQty] = useState<LinenQtyMap>({}); // ⬅️ UBAH: dulu Record<string, number>
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -72,9 +75,13 @@ export default function AssignmentDetailPage() {
       });
       setAmenityQty(aQty);
 
-      const lQty: Record<string, number> = {};
+      // ⬅️ UBAH: baca quantity_in & quantity_out, bukan quantity
+      const lQty: LinenQtyMap = {};
       ((linenUsageRes.data as AssignmentLinenUsage[]) || []).forEach((u) => {
-        lQty[u.linen_item_id] = u.quantity;
+        lQty[u.linen_item_id] = {
+          in: u.quantity_in ?? 0,
+          out: u.quantity_out ?? 0,
+        };
       });
       setLinenQty(lQty);
     } catch (err) {
@@ -104,7 +111,7 @@ export default function AssignmentDetailPage() {
         .update({
           status: 'in_progress',
           started_at: new Date().toISOString(),
-          hk_status_in: assignment.room?.housekeeping_status ?? null, // ⬅️ BARU: snapshot status saat masuk kamar
+          hk_status_in: assignment.room?.housekeeping_status ?? null,
         })
         .eq('id', assignment.id);
       if (error) throw error;
@@ -130,12 +137,14 @@ export default function AssignmentDetailPage() {
           recorded_by: profile?.id ?? null,
         }));
 
+      // ⬅️ UBAH: kirim quantity_in & quantity_out, hanya baris yang salah satunya > 0
       const linenRows = Object.entries(linenQty)
-        .filter(([, qty]) => qty > 0)
-        .map(([linen_item_id, quantity]) => ({
+        .filter(([, qty]) => qty.in > 0 || qty.out > 0)
+        .map(([linen_item_id, qty]) => ({
           assignment_id: assignment.id,
           linen_item_id,
-          quantity,
+          quantity_in: qty.in,
+          quantity_out: qty.out,
           recorded_by: profile?.id ?? null,
         }));
 
@@ -157,12 +166,11 @@ export default function AssignmentDetailPage() {
         .update({
           status: 'completed',
           completed_at: new Date().toISOString(),
-          hk_status_final: assignment.room?.housekeeping_status ?? null, // ⬅️ BARU: snapshot status akhir
+          hk_status_final: assignment.room?.housekeeping_status ?? null,
         })
         .eq('id', assignment.id);
       if (finishError) throw finishError;
 
-      // ⬅️ BARU: trigger sync ke Google Sheets setelah assignment selesai
       try {
         await fetch('/api/sync-assignment', {
           method: 'POST',
@@ -207,6 +215,17 @@ export default function AssignmentDetailPage() {
     (acc[l.category] ||= []).push(l);
     return acc;
   }, {});
+
+  // ⬅️ BARU: helper update salah satu sisi (in/out) linen tanpa menimpa sisi lain
+  const updateLinenQty = (itemId: string, side: 'in' | 'out', value: number) => {
+    setLinenQty((prev) => ({
+      ...prev,
+      [itemId]: {
+        in: side === 'in' ? value : prev[itemId]?.in ?? 0,
+        out: side === 'out' ? value : prev[itemId]?.out ?? 0,
+      },
+    }));
+  };
 
   if (loading) {
     return (
@@ -373,6 +392,7 @@ export default function AssignmentDetailPage() {
             </CardContent>
           </Card>
 
+          {/* ⬅️ UBAH: Linen sekarang 2 input (IN & OUT) per item */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
@@ -385,26 +405,46 @@ export default function AssignmentDetailPage() {
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                     {category.replace('_', ' ')}
                   </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {items.map((l) => (
-                      <div key={l.id} className="space-y-1">
-                        <Label htmlFor={`linen-${l.id}`} className="text-xs">
+                      <div key={l.id} className="space-y-1.5 rounded-md border p-2.5">
+                        <p className="text-xs font-medium">
                           {l.item_name} <span className="text-muted-foreground">({l.unit})</span>
-                        </Label>
-                        <Input
-                          id={`linen-${l.id}`}
-                          type="number"
-                          min={0}
-                          value={linenQty[l.id] ?? 0}
-                          disabled={!canAct}
-                          onChange={(e) =>
-                            setLinenQty((prev) => ({
-                              ...prev,
-                              [l.id]: Math.max(0, parseInt(e.target.value, 10) || 0),
-                            }))
-                          }
-                          className="h-9"
-                        />
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label htmlFor={`linen-in-${l.id}`} className="text-[10px] text-muted-foreground">
+                              IN
+                            </Label>
+                            <Input
+                              id={`linen-in-${l.id}`}
+                              type="number"
+                              min={0}
+                              value={linenQty[l.id]?.in ?? 0}
+                              disabled={!canAct}
+                              onChange={(e) =>
+                                updateLinenQty(l.id, 'in', Math.max(0, parseInt(e.target.value, 10) || 0))
+                              }
+                              className="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`linen-out-${l.id}`} className="text-[10px] text-muted-foreground">
+                              OUT
+                            </Label>
+                            <Input
+                              id={`linen-out-${l.id}`}
+                              type="number"
+                              min={0}
+                              value={linenQty[l.id]?.out ?? 0}
+                              disabled={!canAct}
+                              onChange={(e) =>
+                                updateLinenQty(l.id, 'out', Math.max(0, parseInt(e.target.value, 10) || 0))
+                              }
+                              className="h-9"
+                            />
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
