@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'supervisor' | 'order_taker' | 'housekeeping';
+export type UserRole = 'admin' | 'supervisor' | 'order_taker' | 'housekeeping' | 'evening_shift';
 
 export type HousekeepingStatus =
   | 'vacant_dirty'
@@ -392,6 +392,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   supervisor: 'Supervisor',
   order_taker: 'Order Taker',
   housekeeping: 'Housekeeping Staff',
+  evening_shift: 'Evening Shift',
 };
 
 export const ROLE_COLORS: Record<UserRole, string> = {
@@ -399,4 +400,5 @@ export const ROLE_COLORS: Record<UserRole, string> = {
   supervisor: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   order_taker: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
   housekeeping: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+  evening_shift: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
 };
