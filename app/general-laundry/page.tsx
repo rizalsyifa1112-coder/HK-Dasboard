@@ -185,6 +185,11 @@ export default function GeneralLaundryPage() {
   // ⬅️ BARU: simpan qty returned langsung dari tabel utama (tanpa buka dialog Edit).
   // Update optimistic ke state lokal dulu (biar Missing & Subtotal langsung kerecalculate),
   // baru kirim ke database saat input di-blur.
+  //
+  // ⬅️ FIXED: `.map()` diberi anotasi tipe eksplisit `(r): RecordWithItems =>` dan
+  // `(ri): RecordItemWithLaundry =>` supaya object literal hasil spread dicek langsung
+  // terhadap target type. Tanpa ini, TypeScript salah menyimpulkan `laundry_item` jadi
+  // nullable lagi (quirk pada spread dari intersection type), sehingga build gagal.
   const commitReturnQty = async (record: RecordWithItems, recordItem: RecordItemWithLaundry, rawValue: string) => {
     const newQty = Math.max(0, parseInt(rawValue, 10) || 0);
 
@@ -201,12 +206,12 @@ export default function GeneralLaundryPage() {
 
     // Optimistic update ke state lokal
     setRecords((prev) =>
-      prev.map((r) =>
+      prev.map((r): RecordWithItems =>
         r.id !== record.id
           ? r
           : {
               ...r,
-              items: r.items.map((ri) =>
+              items: r.items.map((ri): RecordItemWithLaundry =>
                 ri.id === recordItem.id ? { ...ri, qty_returned: newQty } : ri
               ),
             }
@@ -224,12 +229,12 @@ export default function GeneralLaundryPage() {
       toast({ title: 'Error', description: 'Gagal menyimpan qty returned, silakan coba lagi', variant: 'destructive' });
       // Rollback optimistic update
       setRecords((prev) =>
-        prev.map((r) =>
+        prev.map((r): RecordWithItems =>
           r.id !== record.id
             ? r
             : {
                 ...r,
-                items: r.items.map((ri) =>
+                items: r.items.map((ri): RecordItemWithLaundry =>
                   ri.id === recordItem.id ? { ...ri, qty_returned: recordItem.qty_returned } : ri
                 ),
               }
