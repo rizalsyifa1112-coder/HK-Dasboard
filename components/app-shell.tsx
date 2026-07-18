@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useTheme } from '@/lib/theme-provider';
+import { supabase } from '@/lib/supabase';
 import { canAccess, type ModuleKey } from '@/lib/permissions';
-import { ROLE_LABELS, ROLE_COLORS } from '@/lib/types';
+import { ROLE_LABELS, ROLE_COLORS, type Notification } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +60,26 @@ const NAV_ITEMS: NavItem[] = [
 
 const GROUP_ORDER = ['Overview', 'Operations', 'Analytics', 'Master Data', 'System'];
 
+// ⬅️ BARU: bunyi notifikasi pakai Web Audio API, tidak perlu file audio eksternal
+function playNotificationSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioCtx();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.35);
+  } catch (e) {
+    console.error('Notification sound failed:', e);
+  }
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -66,6 +87,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // ⬅️ BARU: state notifikasi
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const isAuthPage = pathname === '/login' || pathname === '/signup';
 
@@ -75,13 +100,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     if (!loading && user && isAuthPage) {
-      // ⬅️ BARU: arahkan ke modul pertama yang boleh diakses role ini, bukan selalu /dashboard
       const roleForRedirect = profile?.role ?? 'housekeeping';
       const firstItem = NAV_ITEMS.find((i) => canAccess(roleForRedirect, i.key));
       router.push(firstItem?.href ?? '/dashboard');
       return;
     }
-    // ⬅️ BARU: kalau sudah login tapi buka URL halaman yang tidak diizinkan untuk role-nya, tendang ke halaman yang boleh
     if (!loading && user && !isAuthPage) {
       const roleForRedirect = profile?.role ?? 'housekeeping';
       const matchedItem = NAV_ITEMS.find(
@@ -93,6 +116,67 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
     }
   }, [user, loading, isAuthPage, router, profile, pathname]);
+
+  // ⬅️ BARU: ambil notifikasi awal
+  const fetchNotifications = useCallback(async () => {
+    if (!profile?.id) return;
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', profile.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const list = (data as Notification[]) || [];
+    setNotifications(list);
+    setUnreadCount(list.filter((n) => !n.read).length);
+  }, [profile?.id]);
+
+  // ⬅️ BARU: subscribe realtime — notifikasi baru langsung bunyi + toast + update badge
+  useEffect(() => {
+    if (!profile?.id) return;
+    fetchNotifications();
+
+    const channel = supabase
+      .channel(`notifications-${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          const newNotif = payload.new as Notification;
+          setNotifications((prev) => [newNotif, ...prev].slice(0, 20));
+          setUnreadCount((prev) => prev + 1);
+          playNotificationSound();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id, fetchNotifications]);
+
+  // ⬅️ BARU: tandai satu notifikasi terbaca + navigasi ke link-nya
+  const handleNotificationClick = async (n: Notification) => {
+    if (!n.read) {
+      await supabase.from('notifications').update({ read: true }).eq('id', n.id);
+      setNotifications((prev) => prev.map((item) => (item.id === n.id ? { ...item, read: true } : item)));
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+    if (n.link) router.push(n.link);
+  };
+
+  // ⬅️ BARU: tandai semua terbaca
+  const handleMarkAllRead = async () => {
+    if (!profile?.id) return;
+    await supabase.from('notifications').update({ read: true }).eq('user_id', profile.id).eq('read', false);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
+  };
 
   if (isAuthPage) {
     return <>{children}</>;
@@ -245,10 +329,60 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
 
-            <Button variant="ghost" size="icon" className="relative h-9 w-9">
-              <Bell className="h-4 w-4" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary" />
-            </Button>
+            {/* ⬅️ BARU: Bell jadi dropdown notifikasi asli */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative h-9 w-9">
+                  <Bell className="h-4 w-4" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1 right-1 h-4 min-w-4 px-0.5 rounded-full bg-red-500 text-[10px] leading-4 text-white flex items-center justify-center">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel className="flex items-center justify-between">
+                  <span>Notifikasi</span>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={handleMarkAllRead}
+                      className="text-xs text-primary hover:underline font-normal"
+                    >
+                      Tandai semua dibaca
+                    </button>
+                  )}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="max-h-80 overflow-y-auto">
+                  {notifications.length === 0 && (
+                    <p className="px-3 py-6 text-xs text-muted-foreground text-center">
+                      Belum ada notifikasi
+                    </p>
+                  )}
+                  {notifications.map((n) => (
+                    <DropdownMenuItem
+                      key={n.id}
+                      className={cn(
+                        'flex flex-col items-start gap-0.5 whitespace-normal cursor-pointer py-2',
+                        !n.read && 'bg-primary/5'
+                      )}
+                      onClick={() => handleNotificationClick(n)}
+                    >
+                      <span className="text-xs font-medium">{n.title}</span>
+                      {n.message && (
+                        <span className="text-[11px] text-muted-foreground">{n.message}</span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {new Date(n.created_at).toLocaleString('id-ID', {
+                          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
