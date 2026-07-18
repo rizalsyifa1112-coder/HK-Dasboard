@@ -17,7 +17,8 @@ function formatDate(d: Date) {
 }
 function formatTime(iso: string | null) {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const t = new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  return `'${t}`; // tanda kutip depan → paksa Sheets simpan sebagai teks, bukan angka waktu
 }
 
 export async function POST(req: NextRequest) {
