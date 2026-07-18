@@ -22,14 +22,13 @@ import {
   type AssignmentAmenityUsage, type AssignmentLinenUsage,
 } from '@/lib/types';
 
-// ⬅️ BARU: status yang dianggap "sudah pasti checkout" begitu staff mulai bekerja
-const HK_START_STATUS: Record<string, string> = {
-  expected_departure: 'vacant_dirty',
-};
-// ⬅️ BARU: mapping status kotor → bersih saat cleaning selesai
 const DIRTY_TO_CLEAN: Record<string, string> = {
   vacant_dirty: 'vacant_clean',
   occupied_dirty: 'occupied_clean',
+};
+
+const HK_START_STATUS: Record<string, string> = {
+  expected_departure: 'vacant_dirty',
 };
 
 type LinenQtyMap = Record<string, { in: number; out: number }>;
@@ -111,38 +110,40 @@ export default function AssignmentDetailPage() {
   }, [assignment?.status]);
 
   const handleStart = async () => {
-  if (!assignment) return;
-  setStarting(true);
-  try {
-    const currentStatus = assignment.room?.housekeeping_status ?? '';
-    const startStatus = HK_START_STATUS[currentStatus] ?? currentStatus; // ⬅️ BARU: terjemahkan ED → VD
+    if (!assignment) return;
+    setStarting(true);
+    try {
+      const currentStatus = assignment.room?.housekeeping_status ?? '';
+      const startStatus = HK_START_STATUS[currentStatus] ?? currentStatus;
 
-    const { error } = await supabase
-      .from('assignments')
-      .update({
-        status: 'in_progress',
-        started_at: new Date().toISOString(),
-        hk_status_in: startStatus, // ⬅️ BARU: pakai hasil terjemahan, bukan status mentah
-      })
-      .eq('id', assignment.id);
-    if (error) throw error;
+      const { error } = await supabase
+        .from('assignments')
+        .update({
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+          hk_status_in: startStatus,
+        })
+        .eq('id', assignment.id);
+      if (error) throw error;
 
-    // ⬅️ BARU: sinkronkan juga status kamar aslinya supaya konsisten di seluruh dashboard
-    if (assignment.room_id && startStatus !== currentStatus) {
-      await supabase
-        .from('rooms')
-        .update({ housekeeping_status: startStatus })
-        .eq('id', assignment.room_id);
+      if (assignment.room_id && startStatus !== currentStatus) {
+        const { error: roomError } = await supabase
+          .from('rooms')
+          .update({ housekeeping_status: startStatus })
+          .eq('id', assignment.room_id);
+        if (roomError) {
+          console.error('Failed to sync room status on start:', roomError);
+        }
+      }
+
+      toast({ title: 'Started', description: 'Cleaning started — timer is running' });
+      fetchAll();
+    } catch (err) {
+      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setStarting(false);
     }
-
-    toast({ title: 'Started', description: 'Cleaning started — timer is running' });
-    fetchAll();
-  } catch (err) {
-    toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
-  } finally {
-    setStarting(false);
-  }
-};
+  };
 
   const handleFinish = async () => {
     if (!assignment) return;
@@ -180,7 +181,6 @@ export default function AssignmentDetailPage() {
         if (error) throw error;
       }
 
-      // ⬅️ BARU: hitung status akhir kamar (kotor → bersih)
       const currentRoomStatus = assignment.room?.housekeeping_status ?? '';
       const finalStatus = DIRTY_TO_CLEAN[currentRoomStatus] ?? currentRoomStatus;
 
@@ -189,12 +189,11 @@ export default function AssignmentDetailPage() {
         .update({
           status: 'completed',
           completed_at: new Date().toISOString(),
-          hk_status_final: finalStatus, // ⬅️ BARU: dulu assignment.room?.housekeeping_status
+          hk_status_final: finalStatus,
         })
         .eq('id', assignment.id);
       if (finishError) throw finishError;
 
-      // ⬅️ BARU: sinkronkan status kamar aslinya juga jadi bersih
       if (assignment.room_id) {
         const { error: roomError } = await supabase
           .from('rooms')
