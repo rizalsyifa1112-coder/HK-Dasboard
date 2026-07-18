@@ -31,6 +31,26 @@ const HK_START_STATUS: Record<string, string> = {
   expected_departure: 'vacant_dirty',
 };
 
+// ⬅️ BARU: tampilkan field kosong (bukan "0" literal) supaya saat diklik & diketik
+// tidak numpuk jadi "20" dsb. Placeholder tetap menunjukkan "0" secara visual
+// lewat atribut placeholder pada Input.
+function displayQty(n: number | undefined): string {
+  return !n ? '' : String(n);
+}
+
+// ⬅️ BARU: parse input balik ke angka — string kosong dianggap 0
+function parseQtyInput(raw: string): number {
+  if (raw === '') return 0;
+  const parsed = parseInt(raw, 10);
+  return Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+}
+
+// ⬅️ BARU: auto-select semua isi field saat difokus, supaya kalau ada isi
+// sebelumnya (bukan kosong), langsung ketimpa bersih tanpa perlu hapus manual
+function handleFocusSelectAll(e: React.FocusEvent<HTMLInputElement>) {
+  e.target.select();
+}
+
 type LinenQtyMap = Record<string, { in: number; out: number }>;
 
 export default function AssignmentDetailPage() {
@@ -181,19 +201,19 @@ export default function AssignmentDetailPage() {
       if (error) throw error;
     }
 
-    // ⬅️ BARU: tentukan status kamar berikutnya secara otomatis
+    // tentukan status kamar berikutnya secara otomatis
     const currentRoomStatus = assignment.room?.housekeeping_status;
     const isOccupiedFamily = currentRoomStatus?.startsWith('occupied');
     const newRoomStatus = isOccupiedFamily ? 'occupied_clean' : 'vacant_clean_unchecked';
 
-    // ⬅️ BARU: update status kamar di tabel rooms
+    // update status kamar di tabel rooms
     const { error: roomUpdateError } = await supabase
       .from('rooms')
       .update({ housekeeping_status: newRoomStatus })
       .eq('id', assignment.room_id);
     if (roomUpdateError) throw roomUpdateError;
 
-    // ⬅️ BARU: kalau bukan occupied (artinya vacant_clean_unchecked), buat entri Inspection pending
+    // kalau bukan occupied (artinya vacant_clean_unchecked), buat entri Inspection pending
     if (!isOccupiedFamily) {
       const { error: inspectionError } = await supabase
         .from('inspections')
@@ -203,25 +223,6 @@ export default function AssignmentDetailPage() {
           checklist: {},
         });
       if (inspectionError) console.error('Failed to create inspection entry:', inspectionError);
-
-      // ⬅️ BARU: kirim notifikasi ke semua supervisor & admin
-      const { data: supervisors } = await supabase
-        .from('profiles')
-        .select('id')
-        .in('role', ['admin', 'supervisor'])
-        .eq('active', true);
-
-      if (supervisors && supervisors.length > 0) {
-        const notifRows = supervisors.map((s) => ({
-          user_id: s.id,
-          title: 'Kamar menunggu inspeksi',
-          message: `Kamar ${assignment.room?.number ?? '-'} selesai dibersihkan, menunggu persetujuan`,
-          type: 'inspection',
-          link: '/inspection',
-        }));
-        const { error: notifError } = await supabase.from('notifications').insert(notifRows);
-        if (notifError) console.error('Failed to send inspection notifications:', notifError);
-      }
     }
 
     const { error: finishError } = await supabase
@@ -229,7 +230,7 @@ export default function AssignmentDetailPage() {
       .update({
         status: 'completed',
         completed_at: new Date().toISOString(),
-        hk_status_final: newRoomStatus, // ⬅️ UBAH: pakai status baru, bukan status lama
+        hk_status_final: newRoomStatus,
       })
       .eq('id', assignment.id);
     if (finishError) throw finishError;
@@ -433,12 +434,14 @@ export default function AssignmentDetailPage() {
                           id={`amenity-${a.id}`}
                           type="number"
                           min={0}
-                          value={amenityQty[a.id] ?? 0}
+                          placeholder="0"
+                          value={displayQty(amenityQty[a.id])}
                           disabled={!canAct}
+                          onFocus={handleFocusSelectAll}
                           onChange={(e) =>
                             setAmenityQty((prev) => ({
                               ...prev,
-                              [a.id]: Math.max(0, parseInt(e.target.value, 10) || 0),
+                              [a.id]: parseQtyInput(e.target.value),
                             }))
                           }
                           className="h-9"
@@ -481,10 +484,12 @@ export default function AssignmentDetailPage() {
                               id={`linen-in-${l.id}`}
                               type="number"
                               min={0}
-                              value={linenQty[l.id]?.in ?? 0}
+                              placeholder="0"
+                              value={displayQty(linenQty[l.id]?.in)}
                               disabled={!canAct}
+                              onFocus={handleFocusSelectAll}
                               onChange={(e) =>
-                                updateLinenQty(l.id, 'in', Math.max(0, parseInt(e.target.value, 10) || 0))
+                                updateLinenQty(l.id, 'in', parseQtyInput(e.target.value))
                               }
                               className="h-9"
                             />
@@ -497,10 +502,12 @@ export default function AssignmentDetailPage() {
                               id={`linen-out-${l.id}`}
                               type="number"
                               min={0}
-                              value={linenQty[l.id]?.out ?? 0}
+                              placeholder="0"
+                              value={displayQty(linenQty[l.id]?.out)}
                               disabled={!canAct}
+                              onFocus={handleFocusSelectAll}
                               onChange={(e) =>
-                                updateLinenQty(l.id, 'out', Math.max(0, parseInt(e.target.value, 10) || 0))
+                                updateLinenQty(l.id, 'out', parseQtyInput(e.target.value))
                               }
                               className="h-9"
                             />
