@@ -203,6 +203,25 @@ export default function AssignmentDetailPage() {
           checklist: {},
         });
       if (inspectionError) console.error('Failed to create inspection entry:', inspectionError);
+
+      // ⬅️ BARU: kirim notifikasi ke semua supervisor & admin
+      const { data: supervisors } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('role', ['admin', 'supervisor'])
+        .eq('active', true);
+
+      if (supervisors && supervisors.length > 0) {
+        const notifRows = supervisors.map((s) => ({
+          user_id: s.id,
+          title: 'Kamar menunggu inspeksi',
+          message: `Kamar ${assignment.room?.number ?? '-'} selesai dibersihkan, menunggu persetujuan`,
+          type: 'inspection',
+          link: '/inspection',
+        }));
+        const { error: notifError } = await supabase.from('notifications').insert(notifRows);
+        if (notifError) console.error('Failed to send inspection notifications:', notifError);
+      }
     }
 
     const { error: finishError } = await supabase
