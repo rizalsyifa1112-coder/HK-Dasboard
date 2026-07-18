@@ -167,13 +167,38 @@ export default function AssignmentsPage() {
     }
     setSaving(true);
     try {
-      const inserts = entries.map(([roomId, staffId]) => ({
+      const handleBulkCreate = async () => {
+  const entries = Object.entries(roomAssignments).filter(([, staffId]) => !!staffId);
+  if (entries.length === 0) {
+    toast({ title: 'Validation', description: 'Select at least one staff for a room', variant: 'destructive' });
+    return;
+  }
+  setSaving(true);
+  try {
+    const inserts = entries.map(([roomId, staffId]) => {
+      const room = rooms.find((r) => r.id === roomId); // ⬅️ BARU: cari data kamar untuk ambil status saat ini
+      return {
         room_id: roomId,
         staff_id: staffId,
         task_type: 'cleaning' as const,
         priority: 'normal' as const,
         status: 'pending' as const,
-      }));
+        fo_status: room?.housekeeping_status ?? null, // ⬅️ BARU: simpan status kamar saat pertama kali di-assign
+      };
+    });
+    const { error } = await supabase.from('assignments').insert(inserts);
+    if (error) throw error;
+    toast({ title: 'Created', description: `${inserts.length} assignment(s) created successfully` });
+    setDialogOpen(false);
+    setRoomAssignments({});
+    fetchData();
+  } catch (err) {
+    console.error('Bulk create error:', err);
+    toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+  } finally {
+    setSaving(false);
+  }
+};
       const { error } = await supabase.from('assignments').insert(inserts);
       if (error) throw error;
       toast({ title: 'Created', description: `${inserts.length} assignment(s) created successfully` });
