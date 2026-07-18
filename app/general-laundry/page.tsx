@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
@@ -16,17 +16,27 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Plus, Shirt, Loader2, ChevronDown, ChevronUp,
-  Pencil, Trash2, AlertTriangle,
+  Pencil, Trash2, AlertTriangle, Filter,
 } from 'lucide-react';
 import type { GeneralLaundryRecord, GeneralLaundryItem, GeneralLaundryRecordItem } from '@/lib/types';
 
 type RecordWithItems = GeneralLaundryRecord & {
   items: (GeneralLaundryRecordItem & { laundry_item: GeneralLaundryItem })[];
 };
+
+// ⬅️ BARU: label & opsi untuk filter kategori di dalam dialog input
+const CATEGORY_FILTER_OPTIONS = [
+  { label: 'All Categories', value: 'all' },
+  { label: 'Linen Room', value: 'room' },
+  { label: 'Linen F&B', value: 'fnb' },
+];
 
 export default function GeneralLaundryPage() {
   const { profile } = useAuth();
@@ -42,6 +52,8 @@ export default function GeneralLaundryPage() {
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formNotes, setFormNotes] = useState('');
   const [formItems, setFormItems] = useState<Record<string, { qty_sent: number; qty_returned: number; price: number }>>({});
+  // ⬅️ BARU: state filter kategori, khusus dipakai di dalam dialog input
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   const canEdit = profile?.role === 'order_taker' || profile?.role === 'supervisor' || profile?.role === 'admin';
 
@@ -66,10 +78,17 @@ export default function GeneralLaundryPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // ⬅️ BARU: daftar item yang ditampilkan di dialog, terfilter sesuai kategori dipilih
+  const visibleLaundryItems = useMemo(() => {
+    if (categoryFilter === 'all') return laundryItems;
+    return laundryItems.filter((i) => i.category === categoryFilter);
+  }, [laundryItems, categoryFilter]);
+
   const openCreate = () => {
     setEditingRecord(null);
     setFormDate(new Date().toISOString().split('T')[0]);
     setFormNotes('');
+    setCategoryFilter('all');
     const defaults: Record<string, { qty_sent: number; qty_returned: number; price: number }> = {};
     laundryItems.forEach((i) => {
       defaults[i.id] = { qty_sent: 0, qty_returned: 0, price: i.default_price };
@@ -82,6 +101,7 @@ export default function GeneralLaundryPage() {
     setEditingRecord(record);
     setFormDate(record.send_date);
     setFormNotes(record.notes ?? '');
+    setCategoryFilter('all');
     const vals: Record<string, { qty_sent: number; qty_returned: number; price: number }> = {};
     laundryItems.forEach((i) => {
       const existing = record.items.find((ri) => ri.laundry_item_id === i.id);
@@ -165,6 +185,13 @@ export default function GeneralLaundryPage() {
 
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
+
+  // ⬅️ BARU: hitung berapa item di kategori ini yang sudah diisi qty > 0,
+  // supaya order taker tetap tahu ada input tersembunyi di kategori lain
+  const filledCountOutsideFilter = useMemo(() => {
+    if (categoryFilter === 'all') return 0;
+    return laundryItems.filter((i) => i.category !== categoryFilter && (formItems[i.id]?.qty_sent ?? 0) > 0).length;
+  }, [laundryItems, categoryFilter, formItems]);
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -322,6 +349,28 @@ export default function GeneralLaundryPage() {
             </div>
           </div>
 
+          {/* ⬅️ BARU: dropdown filter kategori, supaya order taker tidak perlu
+              scroll semua item sekaligus tiap hari */}
+          <div className="space-y-1.5 mb-2">
+            <Label>Category</Label>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-[220px]">
+                <Filter className="mr-2 h-4 w-4" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORY_FILTER_OPTIONS.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {filledCountOutsideFilter > 0 && (
+              <p className="text-xs text-amber-500">
+                {filledCountOutsideFilter} item di kategori lain sudah diisi qty — tidak akan hilang saat disimpan.
+              </p>
+            )}
+          </div>
+
           <div className="flex-1 overflow-y-auto rounded-md border">
             <Table>
               <TableHeader className="sticky top-0 bg-card z-10">
@@ -334,7 +383,7 @@ export default function GeneralLaundryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {laundryItems.map((item) => {
+                {visibleLaundryItems.map((item) => {
                   const v = formItems[item.id] ?? { qty_sent: 0, qty_returned: 0, price: item.default_price };
                   const missing = v.qty_sent - v.qty_returned;
                   return (
@@ -375,6 +424,13 @@ export default function GeneralLaundryPage() {
                     </TableRow>
                   );
                 })}
+                {visibleLaundryItems.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">
+                      No items in this category
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
