@@ -22,7 +22,12 @@ import {
   type AssignmentAmenityUsage, type AssignmentLinenUsage,
 } from '@/lib/types';
 
-// ⬅️ BARU: tipe untuk qty in/out per linen item
+// ⬅️ BARU: mapping status kotor → bersih saat cleaning selesai
+const DIRTY_TO_CLEAN: Record<string, string> = {
+  vacant_dirty: 'vacant_clean',
+  occupied_dirty: 'occupied_clean',
+};
+
 type LinenQtyMap = Record<string, { in: number; out: number }>;
 
 export default function AssignmentDetailPage() {
@@ -36,7 +41,7 @@ export default function AssignmentDetailPage() {
   const [amenities, setAmenities] = useState<Amenity[]>([]);
   const [linenItems, setLinenItems] = useState<LinenInventory[]>([]);
   const [amenityQty, setAmenityQty] = useState<Record<string, number>>({});
-  const [linenQty, setLinenQty] = useState<LinenQtyMap>({}); // ⬅️ UBAH: dulu Record<string, number>
+  const [linenQty, setLinenQty] = useState<LinenQtyMap>({});
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -75,7 +80,6 @@ export default function AssignmentDetailPage() {
       });
       setAmenityQty(aQty);
 
-      // ⬅️ UBAH: baca quantity_in & quantity_out, bukan quantity
       const lQty: LinenQtyMap = {};
       ((linenUsageRes.data as AssignmentLinenUsage[]) || []).forEach((u) => {
         lQty[u.linen_item_id] = {
@@ -137,7 +141,6 @@ export default function AssignmentDetailPage() {
           recorded_by: profile?.id ?? null,
         }));
 
-      // ⬅️ UBAH: kirim quantity_in & quantity_out, hanya baris yang salah satunya > 0
       const linenRows = Object.entries(linenQty)
         .filter(([, qty]) => qty.in > 0 || qty.out > 0)
         .map(([linen_item_id, qty]) => ({
@@ -161,15 +164,33 @@ export default function AssignmentDetailPage() {
         if (error) throw error;
       }
 
+      // ⬅️ BARU: hitung status akhir kamar (kotor → bersih)
+      const currentRoomStatus = assignment.room?.housekeeping_status ?? '';
+      const finalStatus = DIRTY_TO_CLEAN[currentRoomStatus] ?? currentRoomStatus;
+
       const { error: finishError } = await supabase
         .from('assignments')
         .update({
           status: 'completed',
           completed_at: new Date().toISOString(),
-          hk_status_final: assignment.room?.housekeeping_status ?? null,
+          hk_status_final: finalStatus, // ⬅️ BARU: dulu assignment.room?.housekeeping_status
         })
         .eq('id', assignment.id);
       if (finishError) throw finishError;
+
+      // ⬅️ BARU: sinkronkan status kamar aslinya juga jadi bersih
+      if (assignment.room_id) {
+        const { error: roomError } = await supabase
+          .from('rooms')
+          .update({
+            housekeeping_status: finalStatus,
+            last_cleaned_at: new Date().toISOString(),
+          })
+          .eq('id', assignment.room_id);
+        if (roomError) {
+          console.error('Failed to update room status:', roomError);
+        }
+      }
 
       try {
         await fetch('/api/sync-assignment', {
@@ -216,7 +237,6 @@ export default function AssignmentDetailPage() {
     return acc;
   }, {});
 
-  // ⬅️ BARU: helper update salah satu sisi (in/out) linen tanpa menimpa sisi lain
   const updateLinenQty = (itemId: string, side: 'in' | 'out', value: number) => {
     setLinenQty((prev) => ({
       ...prev,
@@ -392,7 +412,6 @@ export default function AssignmentDetailPage() {
             </CardContent>
           </Card>
 
-          {/* ⬅️ UBAH: Linen sekarang 2 input (IN & OUT) per item */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
