@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import type { GeneralLaundryRecord, GeneralLaundryItem, GeneralLaundryRecordItem } from '@/lib/types';
 
-type RecordItemWithLaundry = GeneralLaundryRecordItem & { laundry_item: GeneralLaundryItem };
+type RecordItemWithLaundry = Omit<GeneralLaundryRecordItem, 'laundry_item'> & { laundry_item: GeneralLaundryItem };
 type RecordWithItems = GeneralLaundryRecord & {
   items: RecordItemWithLaundry[];
 };
