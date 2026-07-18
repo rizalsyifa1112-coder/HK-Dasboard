@@ -22,7 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Search, RefreshCw, Download, Plus, ClipboardCheck, Loader2,
+  Search, RefreshCw, Download, Plus, ClipboardCheck, Loader2, CheckCircle2, // ⬅️ BARU: CheckCircle2
 } from 'lucide-react';
 import { type Inspection, type Room, type Profile } from '@/lib/types';
 
@@ -50,6 +50,7 @@ export default function InspectionPage() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [releasingId, setReleasingId] = useState<string | null>(null); // ⬅️ BARU
   const [form, setForm] = useState({
     room_id: '',
     status: 'pending' as Inspection['status'],
@@ -129,6 +130,39 @@ export default function InspectionPage() {
     }
   };
 
+  // ⬅️ BARU: 1 tombol untuk approve inspeksi pending + finalisasi status kamar
+  const handleRelease = async (inspection: Inspection) => {
+    setReleasingId(inspection.id);
+    try {
+      const { error: inspErr } = await supabase
+        .from('inspections')
+        .update({
+          status: 'passed',
+          inspector_id: profile?.id ?? null,
+          inspected_at: new Date().toISOString(),
+        })
+        .eq('id', inspection.id);
+      if (inspErr) throw inspErr;
+
+      const { error: roomErr } = await supabase
+        .from('rooms')
+        .update({ housekeeping_status: 'vacant_clean' })
+        .eq('id', inspection.room_id);
+      if (roomErr) throw roomErr;
+
+      toast({
+        title: 'Released',
+        description: `Room ${inspection.room?.number ?? '-'} released to dashboard as Vacant Clean`,
+      });
+      fetchData();
+    } catch (err) {
+      console.error('Release error:', err);
+      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setReleasingId(null);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
@@ -186,6 +220,7 @@ export default function InspectionPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Score</TableHead>
                 <TableHead>Date</TableHead>
+                {canEdit && <TableHead className="text-right">Actions</TableHead>} {/* ⬅️ BARU */}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -218,6 +253,25 @@ export default function InspectionPage() {
                       ? new Date(i.inspected_at).toLocaleDateString()
                       : new Date(i.created_at).toLocaleDateString()}
                   </TableCell>
+                  {/* ⬅️ BARU: kolom Actions, 1 tombol Release khusus status pending */}
+                  {canEdit && (
+                    <TableCell className="text-right">
+                      {i.status === 'pending' && (
+                        <Button
+                          size="sm"
+                          onClick={() => handleRelease(i)}
+                          disabled={releasingId === i.id}
+                        >
+                          {releasingId === i.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                          )}
+                          Release to Dashboard
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
