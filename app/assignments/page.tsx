@@ -196,6 +196,19 @@ export default function AssignmentsPage() {
     }));
   }, [rooms, tableSearch]);
 
+  // ⬅️ BARU: kamar yang sudah punya assignment aktif hari ini (bukan cancelled)
+  // tidak boleh di-assign ulang lewat dialog New Assignment — cegah dobel-assign.
+  // Revisi/koreksi assignment yang sudah ada dilakukan lewat panel utama
+  // (tombol edit/cancel), bukan lewat dialog ini.
+  const activeAssignmentByRoom = useMemo(() => {
+    const map = new Map<string, Assignment>();
+    for (const a of assignments) {
+      if (a.status === 'cancelled') continue;
+      map.set(a.room_id, a);
+    }
+    return map;
+  }, [assignments]);
+
   const openBulkDialog = () => {
     setRoomAssignments({});
     setTableSearch('');
@@ -592,21 +605,39 @@ export default function AssignmentsPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <Select
-                              value={roomAssignments[r.id] ?? ''}
-                              onValueChange={(v) =>
-                                setRoomAssignments((prev) => ({ ...prev, [r.id]: v }))
-                              }
-                            >
-                              <SelectTrigger className="h-8 w-[170px] text-xs">
-                                <SelectValue placeholder="Unassigned" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {staff.map((s) => (
-                                  <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {activeAssignmentByRoom.has(r.id) ? (
+                              <div className="flex items-center gap-1.5 text-xs">
+                                <span className="text-muted-foreground">Sudah di-assign:</span>
+                                <span className="font-medium">
+                                  {activeAssignmentByRoom.get(r.id)!.staff?.full_name ?? 'Unassigned'}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    'text-[10px] px-1.5 py-0',
+                                    ASSIGNMENT_STATUS_COLORS[activeAssignmentByRoom.get(r.id)!.status]
+                                  )}
+                                >
+                                  {ASSIGNMENT_STATUS_LABELS[activeAssignmentByRoom.get(r.id)!.status]}
+                                </Badge>
+                              </div>
+                            ) : (
+                              <Select
+                                value={roomAssignments[r.id] ?? ''}
+                                onValueChange={(v) =>
+                                  setRoomAssignments((prev) => ({ ...prev, [r.id]: v }))
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-[170px] text-xs">
+                                  <SelectValue placeholder="Unassigned" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {staff.map((s) => (
+                                    <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
