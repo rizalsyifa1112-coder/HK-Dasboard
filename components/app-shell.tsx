@@ -72,11 +72,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!loading && !user && !isAuthPage) {
       router.push('/login');
+      return;
     }
     if (!loading && user && isAuthPage) {
-      router.push('/dashboard');
+      // ⬅️ BARU: arahkan ke modul pertama yang boleh diakses role ini, bukan selalu /dashboard
+      const roleForRedirect = profile?.role ?? 'housekeeping';
+      const firstItem = NAV_ITEMS.find((i) => canAccess(roleForRedirect, i.key));
+      router.push(firstItem?.href ?? '/dashboard');
+      return;
     }
-  }, [user, loading, isAuthPage, router]);
+    // ⬅️ BARU: kalau sudah login tapi buka URL halaman yang tidak diizinkan untuk role-nya, tendang ke halaman yang boleh
+    if (!loading && user && !isAuthPage) {
+      const roleForRedirect = profile?.role ?? 'housekeeping';
+      const matchedItem = NAV_ITEMS.find(
+        (i) => pathname === i.href || pathname.startsWith(i.href + '/')
+      );
+      if (matchedItem && !canAccess(roleForRedirect, matchedItem.key)) {
+        const firstItem = NAV_ITEMS.find((i) => canAccess(roleForRedirect, i.key));
+        router.push(firstItem?.href ?? '/login');
+      }
+    }
+  }, [user, loading, isAuthPage, router, profile, pathname]);
 
   if (isAuthPage) {
     return <>{children}</>;
