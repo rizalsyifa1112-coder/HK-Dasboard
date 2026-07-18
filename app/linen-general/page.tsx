@@ -31,6 +31,16 @@ const CATEGORY_OPTIONS = [
   { label: 'Linen F&B', value: 'fnb' },
 ];
 
+const CATEGORY_LABELS: Record<GeneralLaundryItem['category'], string> = {
+  room: 'Linen Room',
+  fnb: 'Linen F&B',
+};
+
+const CATEGORY_COLORS: Record<GeneralLaundryItem['category'], string> = {
+  room: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+  fnb: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+};
+
 export default function LinenGeneralPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -40,7 +50,7 @@ export default function LinenGeneralPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<GeneralLaundryItem | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', code: '', unit: 'pcs', default_price: '', category: 'room' });
+  const [form, setForm] = useState({ name: '', code: '', unit: 'pcs', default_price: '', category: 'room' as GeneralLaundryItem['category'] });
 
   const canEdit = profile?.role === 'admin';
 
@@ -77,7 +87,8 @@ export default function LinenGeneralPage() {
       code: item.code,
       unit: item.unit,
       default_price: String(item.default_price),
-      category: 'room',
+      // ⬅️ FIX: sebelumnya selalu di-hardcode 'room', sekarang ambil dari data asli item
+      category: item.category,
     });
     setDialogOpen(true);
   };
@@ -106,6 +117,8 @@ export default function LinenGeneralPage() {
         code: form.code.toUpperCase(),
         unit: form.unit,
         default_price: parseFloat(form.default_price) || 0,
+        // ⬅️ FIX: sebelumnya category tidak pernah dikirim ke database
+        category: form.category,
       };
       if (editingItem) {
         const { error } = await supabase.from('general_laundry_items').update(payload).eq('id', editingItem.id);
@@ -167,6 +180,7 @@ export default function LinenGeneralPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Code</TableHead>
+                <TableHead>Category</TableHead>
                 <TableHead>Unit</TableHead>
                 <TableHead className="text-right">Default Price</TableHead>
                 {canEdit && <TableHead className="text-right">Actions</TableHead>}
@@ -177,6 +191,11 @@ export default function LinenGeneralPage() {
                 <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.name}</TableCell>
                   <TableCell className="font-mono text-sm">{item.code}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={cn('text-xs', CATEGORY_COLORS[item.category])}>
+                      {CATEGORY_LABELS[item.category]}
+                    </Badge>
+                  </TableCell>
                   <TableCell>{item.unit}</TableCell>
                   <TableCell className="text-right">{formatCurrency(item.default_price)}</TableCell>
                   {canEdit && (
@@ -212,6 +231,23 @@ export default function LinenGeneralPage() {
             <div className="space-y-1.5">
               <Label htmlFor="code">Code</Label>
               <Input id="code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="LR-BT" />
+            </div>
+            {/* ⬅️ BARU: dropdown kategori sekarang benar-benar dirender di form */}
+            <div className="space-y-1.5">
+              <Label>Category</Label>
+              <Select
+                value={form.category}
+                onValueChange={(v) => setForm({ ...form, category: v as GeneralLaundryItem['category'] })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
