@@ -146,91 +146,99 @@ export default function AssignmentDetailPage() {
   };
 
   const handleFinish = async () => {
-    if (!assignment) return;
-    setFinishing(true);
-    try {
-      const amenityRows = Object.entries(amenityQty)
-        .filter(([, qty]) => qty > 0)
-        .map(([amenity_id, quantity]) => ({
-          assignment_id: assignment.id,
-          amenity_id,
-          quantity,
-          recorded_by: profile?.id ?? null,
-        }));
+  if (!assignment) return;
+  setFinishing(true);
+  try {
+    const amenityRows = Object.entries(amenityQty)
+      .filter(([, qty]) => qty > 0)
+      .map(([amenity_id, quantity]) => ({
+        assignment_id: assignment.id,
+        amenity_id,
+        quantity,
+        recorded_by: profile?.id ?? null,
+      }));
 
-      const linenRows = Object.entries(linenQty)
-        .filter(([, qty]) => qty.in > 0 || qty.out > 0)
-        .map(([linen_item_id, qty]) => ({
-          assignment_id: assignment.id,
-          linen_item_id,
-          quantity_in: qty.in,
-          quantity_out: qty.out,
-          recorded_by: profile?.id ?? null,
-        }));
+    const linenRows = Object.entries(linenQty)
+      .filter(([, qty]) => qty.in > 0 || qty.out > 0)
+      .map(([linen_item_id, qty]) => ({
+        assignment_id: assignment.id,
+        linen_item_id,
+        quantity_in: qty.in,
+        quantity_out: qty.out,
+        recorded_by: profile?.id ?? null,
+      }));
 
-      if (amenityRows.length > 0) {
-        const { error } = await supabase
-          .from('assignment_amenity_usage')
-          .upsert(amenityRows, { onConflict: 'assignment_id,amenity_id' });
-        if (error) throw error;
-      }
-      if (linenRows.length > 0) {
-        const { error } = await supabase
-          .from('assignment_linen_usage')
-          .upsert(linenRows, { onConflict: 'assignment_id,linen_item_id' });
-        if (error) throw error;
-      }
-
-      const currentRoomStatus = assignment.room?.housekeeping_status ?? '';
-      const finalStatus = DIRTY_TO_CLEAN[currentRoomStatus] ?? currentRoomStatus;
-
-      const { error: finishError } = await supabase
-        .from('assignments')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          hk_status_final: finalStatus,
-        })
-        .eq('id', assignment.id);
-      if (finishError) throw finishError;
-
-      if (assignment.room_id) {
-        const { error: roomError } = await supabase
-          .from('rooms')
-          .update({
-            housekeeping_status: finalStatus,
-            last_cleaned_at: new Date().toISOString(),
-          })
-          .eq('id', assignment.room_id);
-        if (roomError) {
-          console.error('Failed to update room status:', roomError);
-        }
-      }
-
-      try {
-        await fetch('/api/sync-assignment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assignmentId: assignment.id }),
-        });
-      } catch (syncErr) {
-        console.error('Sync to sheet failed:', syncErr);
-        toast({
-          title: 'Sync gagal',
-          description: 'Data tersimpan, tapi sync ke spreadsheet gagal. Coba Sync manual nanti.',
-          variant: 'destructive',
-        });
-      }
-
-      toast({ title: 'Completed', description: 'Room cleaning finished and usage recorded' });
-      router.push('/assignments');
-    } catch (err) {
-      console.error('Finish error:', err);
-      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
-    } finally {
-      setFinishing(false);
+    if (amenityRows.length > 0) {
+      const { error } = await supabase
+        .from('assignment_amenity_usage')
+        .upsert(amenityRows, { onConflict: 'assignment_id,amenity_id' });
+      if (error) throw error;
     }
-  };
+    if (linenRows.length > 0) {
+      const { error } = await supabase
+        .from('assignment_linen_usage')
+        .upsert(linenRows, { onConflict: 'assignment_id,linen_item_id' });
+      if (error) throw error;
+    }
+
+    // ⬅️ BARU: tentukan status kamar berikutnya secara otomatis
+    const currentRoomStatus = assignment.room?.housekeeping_status;
+    const isOccupiedFamily = currentRoomStatus?.startsWith('occupied');
+    const newRoomStatus = isOccupiedFamily ? 'occupied_clean' : 'vacant_clean_unchecked';
+
+    // ⬅️ BARU: update status kamar di tabel rooms
+    const { error: roomUpdateError } = await supabase
+      .from('rooms')
+      .update({ housekeeping_status: newRoomStatus })
+      .eq('id', assignment.room_id);
+    if (roomUpdateError) throw roomUpdateError;
+
+    // ⬅️ BARU: kalau bukan occupied (artinya vacant_clean_unchecked), buat entri Inspection pending
+    if (!isOccupiedFamily) {
+      const { error: inspectionError } = await supabase
+        .from('inspections')
+        .insert({
+          room_id: assignment.room_id,
+          status: 'pending',
+          checklist: {},
+        });
+      if (inspectionError) console.error('Failed to create inspection entry:', inspectionError);
+    }
+
+    const { error: finishError } = await supabase
+      .from('assignments')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        hk_status_final: newRoomStatus, // ⬅️ UBAH: pakai status baru, bukan status lama
+      })
+      .eq('id', assignment.id);
+    if (finishError) throw finishError;
+
+    try {
+      await fetch('/api/sync-assignment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignmentId: assignment.id }),
+      });
+    } catch (syncErr) {
+      console.error('Sync to sheet failed:', syncErr);
+      toast({
+        title: 'Sync gagal',
+        description: 'Data tersimpan, tapi sync ke spreadsheet gagal. Coba Sync manual nanti.',
+        variant: 'destructive',
+      });
+    }
+
+    toast({ title: 'Completed', description: 'Room cleaning finished and usage recorded' });
+    router.push('/assignments');
+  } catch (err) {
+    console.error('Finish error:', err);
+    toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+  } finally {
+    setFinishing(false);
+  }
+};
 
   const formatElapsed = () => {
     if (!assignment?.started_at) return '00:00:00';
