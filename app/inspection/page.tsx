@@ -22,9 +22,28 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Search, RefreshCw, Download, Plus, ClipboardCheck, Loader2, CheckCircle2, // ⬅️ BARU: CheckCircle2
+  Search, RefreshCw, Download, Plus, ClipboardCheck, Loader2, CheckCircle2,
 } from 'lucide-react';
 import { type Inspection, type Room, type Profile } from '@/lib/types';
+
+// ⬅️ BARU: helper untuk hitung batas "hari ini" berdasarkan zona waktu WIB (UTC+7),
+// sama persis seperti di halaman Assignments — supaya panel Inspection juga
+// "reset" otomatis tiap ganti hari jam 00:00 WIB, bukan ikut jam server (UTC).
+// Data lama TIDAK dihapus, cuma tidak ditampilkan — tetap bisa ditelusuri per
+// tanggal langsung dari database kapan pun dibutuhkan (mis. laporan bulanan).
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function getTodayRangeWIB() {
+  const nowWIB = new Date(Date.now() + WIB_OFFSET_MS);
+  const y = nowWIB.getUTCFullYear();
+  const m = nowWIB.getUTCMonth();
+  const d = nowWIB.getUTCDate();
+
+  const todayStart = new Date(Date.UTC(y, m, d, 0, 0, 0) - WIB_OFFSET_MS);
+  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  return { todayStart, todayEnd };
+}
 
 const INSPECTION_STATUS_LABELS: Record<Inspection['status'], string> = {
   pending: 'Pending',
@@ -50,7 +69,7 @@ export default function InspectionPage() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [releasingId, setReleasingId] = useState<string | null>(null); // ⬅️ BARU
+  const [releasingId, setReleasingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     room_id: '',
     status: 'pending' as Inspection['status'],
@@ -63,10 +82,15 @@ export default function InspectionPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // ⬅️ BARU: hanya inspeksi hari ini (WIB)
+      const { todayStart, todayEnd } = getTodayRangeWIB();
+
       const [inspRes, roomsRes, profRes] = await Promise.all([
         supabase
           .from('inspections')
           .select('*, room:rooms(*), inspector:profiles(*)')
+          .gte('created_at', todayStart.toISOString())
+          .lt('created_at', todayEnd.toISOString())
           .order('created_at', { ascending: false }),
         supabase.from('rooms').select('*').order('number'),
         supabase.from('profiles').select('*').eq('active', true).order('full_name'),
@@ -130,7 +154,7 @@ export default function InspectionPage() {
     }
   };
 
-  // ⬅️ BARU: 1 tombol untuk approve inspeksi pending + finalisasi status kamar
+  // 1 tombol untuk approve inspeksi pending + finalisasi status kamar
   const handleRelease = async (inspection: Inspection) => {
     setReleasingId(inspection.id);
     try {
@@ -149,6 +173,52 @@ export default function InspectionPage() {
         .update({ housekeeping_status: 'vacant_clean' })
         .eq('id', inspection.room_id);
       if (roomErr) throw roomErr;
+
+      // ⬅️ BARU: cari assignment yang menghasilkan inspeksi pending ini — yaitu
+      // assignment completed terakhir untuk kamar ini yang status finalnya masih
+      // "vacant_clean_unchecked" (VCU, belum final). Lalu update status finalnya
+      // jadi "vacant_clean" (VC) dan re-sync ke spreadsheet supaya baris yang
+      // sudah pernah ditulis saat Finish Cleaning ikut ter-update — bukan malah
+      // menambah baris duplikat baru.
+      const { data: relatedAssignment, error: findErr } = await supabase
+        .from('assignments')
+        .select('*')
+        .eq('room_id', inspection.room_id)
+        .eq('status', 'completed')
+        .eq('hk_status_final', 'vacant_clean_unchecked')
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (findErr) {
+        console.error('Failed to find related assignment for sync:', findErr);
+      }
+
+      if (relatedAssignment) {
+        const { error: updateAssignErr } = await supabase
+          .from('assignments')
+          .update({ hk_status_final: 'vacant_clean' })
+          .eq('id', relatedAssignment.id);
+
+        if (updateAssignErr) {
+          console.error('Failed to update assignment hk_status_final:', updateAssignErr);
+        } else {
+          try {
+            await fetch('/api/sync-assignment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ assignmentId: relatedAssignment.id }),
+            });
+          } catch (syncErr) {
+            console.error('Re-sync to sheet failed:', syncErr);
+            toast({
+              title: 'Sync gagal',
+              description: 'Status tersimpan, tapi sync ulang ke spreadsheet gagal. Coba Sync Spreadsheet manual nanti.',
+              variant: 'destructive',
+            });
+          }
+        }
+      }
 
       toast({
         title: 'Released',
@@ -220,7 +290,7 @@ export default function InspectionPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Score</TableHead>
                 <TableHead>Date</TableHead>
-                {canEdit && <TableHead className="text-right">Actions</TableHead>} {/* ⬅️ BARU */}
+                {canEdit && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -253,7 +323,6 @@ export default function InspectionPage() {
                       ? new Date(i.inspected_at).toLocaleDateString()
                       : new Date(i.created_at).toLocaleDateString()}
                   </TableCell>
-                  {/* ⬅️ BARU: kolom Actions, 1 tombol Release khusus status pending */}
                   {canEdit && (
                     <TableCell className="text-right">
                       {i.status === 'pending' && (
