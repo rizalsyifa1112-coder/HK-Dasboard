@@ -1,5 +1,5 @@
 import './globals.css';
-import type { Metadata, Viewport } from 'next';
+import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { ThemeProvider } from '@/lib/theme-provider';
 import { AuthProvider } from '@/lib/auth-context';
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 
 // ⬅️ BARU: viewport terpisah dari metadata (aturan Next.js versi baru),
 // mengatur warna tema browser (address bar di HP) + PWA jadi tidak bisa di-zoom sembarangan
-export const viewport: Viewport = {
+export const viewport = {
   themeColor: '#c9a35a',
   width: 'device-width',
   initialScale: 1,
