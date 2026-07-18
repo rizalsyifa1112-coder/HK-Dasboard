@@ -17,8 +17,12 @@ function formatDate(d: Date) {
 }
 function formatTime(iso: string | null) {
   if (!iso) return '';
-  const t = new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  return `'${t}`; // tanda kutip depan → paksa Sheets simpan sebagai teks, bukan angka waktu
+  const t = new Date(iso).toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Jakarta', // ⬅️ tambahan ini yang penting
+  });
+  return `'${t}`;
 }
 
 export async function POST(req: NextRequest) {
