@@ -72,7 +72,7 @@ export default function LoanManagementPage() {
     notes: '',
   });
 
-  const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.role === 'order_taker';
+  const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.role === 'order_taker' || profile?.role === 'evening_shift';
 
   const fetchData = useCallback(async () => {
     setLoading(true);
