@@ -23,12 +23,13 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Plus, Shirt, Loader2, ChevronDown, ChevronUp,
-  Pencil, Trash2, AlertTriangle, Filter,
+  Pencil, Trash2, AlertTriangle, Filter, Check,
 } from 'lucide-react';
 import type { GeneralLaundryRecord, GeneralLaundryItem, GeneralLaundryRecordItem } from '@/lib/types';
 
+type RecordItemWithLaundry = GeneralLaundryRecordItem & { laundry_item: GeneralLaundryItem };
 type RecordWithItems = GeneralLaundryRecord & {
-  items: (GeneralLaundryRecordItem & { laundry_item: GeneralLaundryItem })[];
+  items: RecordItemWithLaundry[];
 };
 
 // ⬅️ BARU: label & opsi untuk filter kategori di dalam dialog input
@@ -52,8 +53,12 @@ export default function GeneralLaundryPage() {
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formNotes, setFormNotes] = useState('');
   const [formItems, setFormItems] = useState<Record<string, { qty_sent: number; qty_returned: number; price: number }>>({});
-  // ⬅️ BARU: state filter kategori, khusus dipakai di dalam dialog input
   const [categoryFilter, setCategoryFilter] = useState('all');
+
+  // ⬅️ BARU: state khusus untuk input "Returned" inline di tabel utama (di luar dialog).
+  // Draft ketikan disimpan per record-item id, dikirim ke database saat blur.
+  const [returnDrafts, setReturnDrafts] = useState<Record<string, string>>({});
+  const [savingReturnId, setSavingReturnId] = useState<string | null>(null);
 
   const canEdit = profile?.role === 'order_taker' || profile?.role === 'supervisor' || profile?.role === 'admin';
 
@@ -78,7 +83,6 @@ export default function GeneralLaundryPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // ⬅️ BARU: daftar item yang ditampilkan di dialog, terfilter sesuai kategori dipilih
   const visibleLaundryItems = useMemo(() => {
     if (categoryFilter === 'all') return laundryItems;
     return laundryItems.filter((i) => i.category === categoryFilter);
@@ -178,6 +182,64 @@ export default function GeneralLaundryPage() {
     }
   };
 
+  // ⬅️ BARU: simpan qty returned langsung dari tabel utama (tanpa buka dialog Edit).
+  // Update optimistic ke state lokal dulu (biar Missing & Subtotal langsung kerecalculate),
+  // baru kirim ke database saat input di-blur.
+  const commitReturnQty = async (record: RecordWithItems, recordItem: RecordItemWithLaundry, rawValue: string) => {
+    const newQty = Math.max(0, parseInt(rawValue, 10) || 0);
+
+    // Bersihkan draft supaya tampilan kembali mengikuti data asli (yang sudah di-update)
+    setReturnDrafts((prev) => {
+      const next = { ...prev };
+      delete next[recordItem.id];
+      return next;
+    });
+
+    if (newQty === recordItem.qty_returned) return; // tidak berubah, tidak perlu simpan
+
+    setSavingReturnId(recordItem.id);
+
+    // Optimistic update ke state lokal
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.id !== record.id
+          ? r
+          : {
+              ...r,
+              items: r.items.map((ri) =>
+                ri.id === recordItem.id ? { ...ri, qty_returned: newQty } : ri
+              ),
+            }
+      )
+    );
+
+    try {
+      const { error } = await supabase
+        .from('general_laundry_record_items')
+        .update({ qty_returned: newQty })
+        .eq('id', recordItem.id);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Update returned qty error:', err);
+      toast({ title: 'Error', description: 'Gagal menyimpan qty returned, silakan coba lagi', variant: 'destructive' });
+      // Rollback optimistic update
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id !== record.id
+            ? r
+            : {
+                ...r,
+                items: r.items.map((ri) =>
+                  ri.id === recordItem.id ? { ...ri, qty_returned: recordItem.qty_returned } : ri
+                ),
+              }
+        )
+      );
+    } finally {
+      setSavingReturnId(null);
+    }
+  };
+
   const filtered = records.filter((r) =>
     r.record_number.toLowerCase().includes(search.toLowerCase()) ||
     r.send_date.includes(search)
@@ -186,8 +248,6 @@ export default function GeneralLaundryPage() {
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 
-  // ⬅️ BARU: hitung berapa item di kategori ini yang sudah diisi qty > 0,
-  // supaya order taker tetap tahu ada input tersembunyi di kategori lain
   const filledCountOutsideFilter = useMemo(() => {
     if (categoryFilter === 'all') return 0;
     return laundryItems.filter((i) => i.category !== categoryFilter && (formItems[i.id]?.qty_sent ?? 0) > 0).length;
@@ -270,7 +330,7 @@ export default function GeneralLaundryPage() {
                     <div className="flex items-center gap-2">
                       {canEdit && (
                         <>
-                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(record); }}>
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(record); }} title="Edit lengkap (qty sent, tanggal, dll)">
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                           <Button variant="ghost" size="sm" className="text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(record); }}>
@@ -287,13 +347,18 @@ export default function GeneralLaundryPage() {
                       {record.notes && (
                         <p className="text-xs text-muted-foreground mt-3 mb-2 italic">{record.notes}</p>
                       )}
-                      <div className="rounded-md border mt-3 overflow-x-auto">
+                      {canEdit && (
+                        <p className="text-xs text-muted-foreground mt-3 mb-1">
+                          Isi kolom <span className="font-medium">Returned</span> langsung di sini saat barang laundry kembali dari vendor.
+                        </p>
+                      )}
+                      <div className="rounded-md border mt-1 overflow-x-auto">
                         <Table>
                           <TableHeader>
                             <TableRow>
                               <TableHead>Item</TableHead>
                               <TableHead className="text-right">Sent</TableHead>
-                              <TableHead className="text-right">Returned</TableHead>
+                              <TableHead className="text-right w-[130px]">Returned</TableHead>
                               <TableHead className="text-right">Missing</TableHead>
                               <TableHead className="text-right">Price/Item</TableHead>
                               <TableHead className="text-right">Subtotal</TableHead>
@@ -302,11 +367,39 @@ export default function GeneralLaundryPage() {
                           <TableBody>
                             {record.items.map((ri) => {
                               const missing = ri.qty_sent - ri.qty_returned;
+                              const draftValue = returnDrafts[ri.id];
+                              const displayValue = draftValue !== undefined ? draftValue : String(ri.qty_returned || '');
                               return (
                                 <TableRow key={ri.id}>
                                   <TableCell className="text-sm">{ri.laundry_item?.name ?? '-'}</TableCell>
                                   <TableCell className="text-right">{ri.qty_sent}</TableCell>
-                                  <TableCell className="text-right">{ri.qty_returned}</TableCell>
+                                  <TableCell className="text-right">
+                                    {canEdit ? (
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          value={displayValue}
+                                          onChange={(e) =>
+                                            setReturnDrafts((prev) => ({ ...prev, [ri.id]: e.target.value }))
+                                          }
+                                          onBlur={(e) => commitReturnQty(record, ri, e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                                          }}
+                                          className="h-8 text-right w-20"
+                                          placeholder="0"
+                                        />
+                                        {savingReturnId === ri.id ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                        ) : (
+                                          <Check className="h-3.5 w-3.5 text-transparent" />
+                                        )}
+                                      </div>
+                                    ) : (
+                                      ri.qty_returned
+                                    )}
+                                  </TableCell>
                                   <TableCell className={cn('text-right font-medium', missing > 0 && 'text-red-500')}>
                                     {missing > 0 ? `-${missing}` : '0'}
                                   </TableCell>
@@ -349,8 +442,6 @@ export default function GeneralLaundryPage() {
             </div>
           </div>
 
-          {/* ⬅️ BARU: dropdown filter kategori, supaya order taker tidak perlu
-              scroll semua item sekaligus tiap hari */}
           <div className="space-y-1.5 mb-2">
             <Label>Category</Label>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
