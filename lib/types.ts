@@ -305,6 +305,7 @@ export interface GeneralLaundryItem {
   name: string;
   code: string;
   unit: string;
+  category: 'room' | 'fnb';
   default_price: number;
   active: boolean;
   created_at: string;
