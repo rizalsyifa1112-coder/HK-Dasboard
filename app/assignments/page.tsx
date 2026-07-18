@@ -264,6 +264,21 @@ export default function AssignmentsPage() {
       });
       const { error } = await supabase.from('assignments').insert(inserts);
       if (error) throw error;
+
+      // ⬅️ BARU: kirim notifikasi ke masing-masing staff yang baru di-assign
+      const notifRows = entries.map(([roomId, staffId]) => {
+        const room = rooms.find((r) => r.id === roomId);
+        return {
+          user_id: staffId,
+          title: 'Kamar baru ditugaskan',
+          message: `Kamar ${room?.number ?? '-'} telah ditugaskan kepada Anda`,
+          type: 'assignment',
+          link: '/assignments',
+        };
+      });
+      const { error: notifError } = await supabase.from('notifications').insert(notifRows);
+      if (notifError) console.error('Failed to send notifications:', notifError);
+
       toast({ title: 'Created', description: `${inserts.length} assignment(s) created successfully` });
       setDialogOpen(false);
       setRoomAssignments({});
