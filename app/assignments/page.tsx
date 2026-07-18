@@ -19,7 +19,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog'; {/* ⬅️ BARU */}
+} from '@/components/ui/alert-dialog';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2,
-  CheckCircle2, PlayCircle, Pencil, X, // ⬅️ BARU: Pencil, X
+  CheckCircle2, PlayCircle, Pencil, X,
 } from 'lucide-react';
 import {
   PRIORITY_LABELS, PRIORITY_COLORS,
@@ -57,6 +57,26 @@ const TASK_TYPE_LABELS: Record<Assignment['task_type'], string> = {
   vacant: 'Vacant',
 };
 
+// ⬅️ BARU: helper untuk hitung batas "hari ini" berdasarkan zona waktu WIB (UTC+7),
+// bukan zona waktu server. Server (Vercel) jalan di UTC, jadi kalau dihitung pakai
+// new Date().setHours(0,0,0,0) langsung, "hari baru" versi server baru mulai jam
+// 07:00 pagi WIB — bukan tengah malam WIB. Fungsi ini memaksa batas hari selalu
+// jam 00:00 WIB, di mana pun server dijalankan.
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function getTodayRangeWIB() {
+  const nowWIB = new Date(Date.now() + WIB_OFFSET_MS);
+  const y = nowWIB.getUTCFullYear();
+  const m = nowWIB.getUTCMonth();
+  const d = nowWIB.getUTCDate();
+
+  // Jam 00:00 WIB pada tanggal (y, m, d), dikonversi balik ke UTC untuk query
+  const todayStart = new Date(Date.UTC(y, m, d, 0, 0, 0) - WIB_OFFSET_MS);
+  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  return { todayStart, todayEnd };
+}
+
 type RoomWithMeta = Room & {
   floor: Floor | null;
   room_type: RoomType | null;
@@ -81,13 +101,13 @@ export default function AssignmentsPage() {
   const [roomAssignments, setRoomAssignments] = useState<Record<string, string>>({});
   const [tableSearch, setTableSearch] = useState('');
 
-  // ⬅️ BARU: state untuk edit assignment
+  // State untuk edit assignment
   const [editTarget, setEditTarget] = useState<Assignment | null>(null);
   const [editRoomId, setEditRoomId] = useState('');
   const [editStaffId, setEditStaffId] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
-  // ⬅️ BARU: state untuk cancel/delete assignment
+  // State untuk cancel/delete assignment
   const [cancelTarget, setCancelTarget] = useState<Assignment | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -97,9 +117,14 @@ export default function AssignmentsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // ⬅️ BARU: hanya assignment hari ini (WIB) — "reset" otomatis tiap ganti hari jam 00:00 WIB
+      const { todayStart, todayEnd } = getTodayRangeWIB();
+
       let assignQuery = supabase
         .from('assignments')
         .select('*, room:rooms(*), staff:profiles(*)')
+        .gte('assigned_at', todayStart.toISOString())
+        .lt('assigned_at', todayEnd.toISOString())
         .order('assigned_at', { ascending: false });
 
       if (isHousekeeping && profile?.id) {
@@ -130,6 +155,10 @@ export default function AssignmentsPage() {
   }, [fetchData]);
 
   const filtered = assignments.filter((a) => {
+    // ⬅️ Opsi A: assignment cancelled tidak pernah ditampilkan sama sekali,
+    // baik untuk staff maupun supervisor/admin. Data tetap aman di database.
+    if (a.status === 'cancelled') return false;
+
     const roomNum = a.room?.number ?? '';
     const staffName = a.staff?.full_name ?? '';
     const matchSearch =
@@ -192,6 +221,9 @@ export default function AssignmentsPage() {
           priority: 'normal' as const,
           status: 'pending' as const,
           fo_status: room?.housekeeping_status ?? null,
+          // ⬅️ BARU: set eksplisit supaya pasti masuk hitungan "hari ini" (WIB),
+          // tidak bergantung pada default value kolom di database
+          assigned_at: new Date().toISOString(),
         };
       });
       const { error } = await supabase.from('assignments').insert(inserts);
@@ -251,14 +283,14 @@ export default function AssignmentsPage() {
     }
   };
 
-  // ⬅️ BARU: buka dialog edit, isi form dengan data assignment saat ini
+  // Buka dialog edit, isi form dengan data assignment saat ini
   const openEdit = (a: Assignment) => {
     setEditTarget(a);
     setEditRoomId(a.room_id);
     setEditStaffId(a.staff_id ?? '');
   };
 
-  // ⬅️ BARU: simpan perubahan room/staff assignment
+  // Simpan perubahan room/staff assignment
   const handleEditSave = async () => {
     if (!editTarget) return;
     if (!editRoomId || !editStaffId) {
@@ -283,7 +315,7 @@ export default function AssignmentsPage() {
     }
   };
 
-  // ⬅️ BARU: batalkan assignment (set status jadi cancelled)
+  // Batalkan assignment (set status jadi cancelled)
   const handleCancelConfirm = async () => {
     if (!cancelTarget) return;
     setCancelling(true);
@@ -354,9 +386,11 @@ export default function AssignmentsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
-            {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][]).map((s) => (
-              <SelectItem key={s} value={s}>{ASSIGNMENT_STATUS_LABELS[s]}</SelectItem>
-            ))}
+            {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][])
+              .filter((s) => s !== 'cancelled')
+              .map((s) => (
+                <SelectItem key={s} value={s}>{ASSIGNMENT_STATUS_LABELS[s]}</SelectItem>
+              ))}
           </SelectContent>
         </Select>
       </div>
@@ -441,7 +475,7 @@ export default function AssignmentsPage() {
                         </Button>
                       </div>
                     )}
-                    {isHousekeeping && (a.status === 'completed' || a.status === 'cancelled') && (
+                    {isHousekeeping && a.status === 'completed' && (
                       <span className="text-xs text-muted-foreground">No action</span>
                     )}
                     {canManage && (
@@ -454,7 +488,6 @@ export default function AssignmentsPage() {
                         >
                           View
                         </Button>
-                        {/* ⬅️ BARU: tombol edit (pencil), hanya untuk assignment yang belum completed */}
                         {a.status !== 'completed' && (
                           <Button
                             variant="outline"
@@ -466,8 +499,7 @@ export default function AssignmentsPage() {
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        {/* ⬅️ BARU: tombol cancel (x), hanya kalau belum cancelled */}
-                        {a.status !== 'cancelled' && a.status !== 'completed' && (
+                        {a.status !== 'completed' && (
                           <Button
                             variant="outline"
                             size="icon"
@@ -478,19 +510,21 @@ export default function AssignmentsPage() {
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         )}
-                        {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][]).map((s) => (
-                          <Button
-                            key={s}
-                            variant={a.status === s ? 'default' : 'outline'}
-                            size="sm"
-                            disabled={updatingId === a.id}
-                            onClick={() => handleStatusChange(a, s)}
-                            className={cn('text-xs h-7', a.status !== s && ASSIGNMENT_STATUS_COLORS[s])}
-                          >
-                            {updatingId === a.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                            {ASSIGNMENT_STATUS_LABELS[s]}
-                          </Button>
-                        ))}
+                        {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][])
+                          .filter((s) => s !== 'cancelled')
+                          .map((s) => (
+                            <Button
+                              key={s}
+                              variant={a.status === s ? 'default' : 'outline'}
+                              size="sm"
+                              disabled={updatingId === a.id}
+                              onClick={() => handleStatusChange(a, s)}
+                              className={cn('text-xs h-7', a.status !== s && ASSIGNMENT_STATUS_COLORS[s])}
+                            >
+                              {updatingId === a.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                              {ASSIGNMENT_STATUS_LABELS[s]}
+                            </Button>
+                          ))}
                       </div>
                     )}
                   </TableCell>
@@ -600,7 +634,7 @@ export default function AssignmentsPage() {
         </Dialog>
       )}
 
-      {/* ⬅️ BARU: Edit Assignment Dialog */}
+      {/* Edit Assignment Dialog */}
       <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
@@ -649,14 +683,15 @@ export default function AssignmentsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ⬅️ BARU: Cancel Confirmation */}
+      {/* Cancel Confirmation */}
       <AlertDialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Batalkan assignment ini?</AlertDialogTitle>
             <AlertDialogDescription>
-              Assignment untuk kamar {cancelTarget?.room?.number ?? '-'} akan ditandai sebagai cancelled.
-              Tindakan ini tidak menghapus data, hanya mengubah status.
+              Assignment untuk kamar {cancelTarget?.room?.number ?? '-'} akan ditandai sebagai cancelled
+              dan langsung disembunyikan dari daftar (baik untuk Anda maupun staff terkait).
+              Data tidak dihapus dari database — tetap bisa ditelusuri untuk laporan/audit.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
