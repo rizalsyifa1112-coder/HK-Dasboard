@@ -1,7 +1,7 @@
 // Kolom H-W: 8 item linen, urutan sesuai template (masing² IN lalu OUT)
 export const LINEN_COLUMN_ORDER = [
-  'King Bed Sheet',      // → SHEET KING
-  'Queen Bed Sheet',     // → SHEET TWIN
+  'SHEET KING',      // → SHEET KING
+  'SHEET TWIN',     // → SHEET TWIN
   'Duver Cover King',    // → DUVET COVER KING
   'Duve Cover Twin',     // → DUVET COVER TWIN
   'Bath Towel',
