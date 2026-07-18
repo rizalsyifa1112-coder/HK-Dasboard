@@ -28,7 +28,7 @@ import {
 import type { GeneralLaundryRecord, GeneralLaundryItem, GeneralLaundryRecordItem } from '@/lib/types';
 
 type RecordItemWithLaundry = Omit<GeneralLaundryRecordItem, 'laundry_item'> & { laundry_item: GeneralLaundryItem };
-type RecordWithItems = GeneralLaundryRecord & {
+type RecordWithItems = Omit<GeneralLaundryRecord, 'items'> & {
   items: RecordItemWithLaundry[];
 };
 
