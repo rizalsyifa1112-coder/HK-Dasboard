@@ -1,34 +1,36 @@
-// Kolom A-G statis: NO, NO OF ROOM, FO, HK1, HK2, TIME IN, TIME OUT
-// Kolom H-W: 8 item linen, masing-masing IN lalu OUT
+// Kolom H-W: 8 item linen, urutan sesuai template (masing² IN lalu OUT)
 export const LINEN_COLUMN_ORDER = [
-  'Sheet Double',
-  'Sheet Single',
-  'Duvet Cover',
-  'Duvet Cover Single',
+  'King Bed Sheet',      // → SHEET KING
+  'Queen Bed Sheet',     // → SHEET TWIN
+  'Duver Cover King',    // → DUVET COVER KING
+  'Duve Cover Twin',     // → DUVET COVER TWIN
   'Bath Towel',
   'Hand Towel',
   'Bath Mat',
   'Pillow Case',
 ] as const;
 
-// Kolom X-AQ: guest supplies & condiment, masing-masing 1 angka saja
+// Kolom X-AQ: guest supplies & condiment, urutan sesuai template (1 angka saja)
+// ⚠️ Beberapa nama sengaja ditulis sesuai typo yang ada di database Anda
+// supaya tetap ke-match (matching di kode ini case-insensitive, tapi ejaan
+// harus tetap sama persis huruf-nya)
 export const AMENITY_COLUMN_ORDER = [
   'Tissue Roll',
-  'Hand Soap',
-  'Shampoo',
-  'Shower Gel',
-  'Tooth Brush',
+  'Hand Soap',      // ⚠️ belum ada di database Anda, akan selalu 0
+  'Shampoo',        // ⚠️ belum ada di database Anda, akan selalu 0
+  'Shower Gel',      // ⚠️ belum ada di database Anda, akan selalu 0
+  'Dental Kit',      // ⬅️ dipetakan ke slot "Tooth Brush" di template
   'Sterer',
   'Shower Cap',
-  'Slipper',
+  'Sliper',          // ⚠️ typo di database, sengaja ditulis begini
   'Laundry Bag',
   'Laundry List',
   'Memo Pad',
-  'Pencil',
-  'Guest Comment',
+  'Pecil',           // ⚠️ typo di database, sengaja ditulis begini
+  'Guest Comment',   // ⚠️ belum ada di database Anda, akan selalu 0
   'Plastic Bin',
-  'Tisue',
-  'Coffee',
+  'Tissue Facial',
+  'Coffe',           // ⚠️ typo di database, sengaja ditulis begini
   'Sugar',
   'Tea',
   'Creamer',
