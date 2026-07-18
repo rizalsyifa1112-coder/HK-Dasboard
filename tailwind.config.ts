@@ -60,6 +60,13 @@ const config: Config = {
           '4': 'hsl(var(--chart-4))',
           '5': 'hsl(var(--chart-5))',
         },
+        // ⬅️ BARU: warna sidebar didaftarkan supaya bg-sidebar & text-sidebar-foreground
+        // (dipakai di AppShell) benar-benar menghasilkan CSS, bukan class kosong yang
+        // diabaikan Tailwind — inilah penyebab sidebar transparan/numpuk dengan konten.
+        sidebar: {
+          DEFAULT: 'hsl(var(--sidebar))',
+          foreground: 'hsl(var(--sidebar-foreground))',
+        },
       },
       keyframes: {
         'accordion-down': {
