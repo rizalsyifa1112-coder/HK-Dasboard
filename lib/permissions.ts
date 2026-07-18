@@ -43,6 +43,9 @@ const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
   housekeeping: [
     'dashboard', 'assignments',
   ],
+  evening_shift: [
+    'loan-management',
+  ],
 };
 
 export function canAccess(role: UserRole | undefined | null, module: ModuleKey): boolean {
