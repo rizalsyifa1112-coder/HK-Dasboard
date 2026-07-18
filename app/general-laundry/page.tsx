@@ -174,6 +174,13 @@ export default function GeneralLaundryPage() {
       toast({ title: editingRecord ? 'Updated' : 'Created', description: 'Laundry record saved successfully' });
       setDialogOpen(false);
       fetchData();
+
+      // ⬅️ BARU: sync ke Google Sheets (tidak menghalangi UI kalau gagal, cukup di-log)
+      fetch('/api/sync-laundry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId }),
+      }).catch((syncErr) => console.error('Sheet sync failed:', syncErr));
     } catch (err) {
       console.error('Save error:', err);
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
