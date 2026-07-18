@@ -21,7 +21,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil } from 'lucide-react';
+import { Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil, Undo2 } from 'lucide-react';
 import type { LinenItem } from '@/lib/types';
 
 const STATUS_LABELS: Record<LinenItem['status'], string> = {
@@ -57,6 +57,8 @@ export default function LinenTrackingPage() {
   const [editingItem, setEditingItem] = useState<LinenItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
+  // ⬅️ BARU: state loading khusus untuk tombol quick-action (Return) per baris
+  const [quickUpdatingId, setQuickUpdatingId] = useState<string | null>(null);
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'order_taker';
 
@@ -137,6 +139,25 @@ export default function LinenTrackingPage() {
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ⬅️ BARU: tombol cepat "Return" — langsung set status jadi "returned"
+  // tanpa perlu buka dialog Edit. Hanya tampil kalau status saat ini "sent_to_laundry".
+  const handleQuickReturn = async (item: LinenItem) => {
+    setQuickUpdatingId(item.id);
+    try {
+      const { error } = await supabase
+        .from('linen_items')
+        .update({ status: 'returned' })
+        .eq('id', item.id);
+      if (error) throw error;
+      toast({ title: 'Returned', description: `${item.code} ditandai sudah kembali dari laundry` });
+      fetchData();
+    } catch (err) {
+      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setQuickUpdatingId(null);
     }
   };
 
@@ -254,9 +275,27 @@ export default function LinenTrackingPage() {
                   <TableCell className="text-sm text-muted-foreground">{item.notes ?? '-'}</TableCell>
                   {canEdit && (
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
-                        <Pencil className="mr-1 h-3 w-3" /> Edit
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        {item.status === 'sent_to_laundry' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={quickUpdatingId === item.id}
+                            onClick={() => handleQuickReturn(item)}
+                          >
+                            {quickUpdatingId === item.id ? (
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            ) : (
+                              <Undo2 className="mr-1 h-3 w-3" />
+                            )}
+                            Return
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
+                          <Pencil className="mr-1 h-3 w-3" /> Edit
+                        </Button>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
