@@ -163,6 +163,19 @@ export default function LoanManagementPage() {
         loaned_at: new Date().toISOString(),
       });
       if (error) throw error;
+
+      // ⬅️ BARU: kurangi stock barang di loan_items sesuai quantity yang baru dipinjam,
+      // supaya jumlah stock yang tampil di dropdown "Item" selalu real-time akurat.
+      if (selectedLoanItem) {
+        const { error: stockError } = await supabase
+          .from('loan_items')
+          .update({ stock: selectedLoanItem.stock - requestedQty })
+          .eq('id', selectedLoanItem.id);
+        if (stockError) {
+          console.error('Stock decrement error:', stockError);
+        }
+      }
+
       toast({ title: 'Berhasil', description: 'Barang dicatat sebagai dipinjam' });
       setDialogOpen(false);
       resetForm();
@@ -184,6 +197,25 @@ export default function LoanManagementPage() {
       }
       const { error } = await supabase.from('loans').update(updates).eq('id', loan.id);
       if (error) throw error;
+
+      // ⬅️ BARU: kembalikan stock ke loan_items HANYA saat barang benar-benar
+      // dikembalikan (status "returned"), dan HANYA jika sebelumnya belum berstatus
+      // "returned" — supaya stock tidak nambah dobel kalau tombol diklik ulang.
+      // Untuk status "Hilang"/"Rusak" stock sengaja TIDAK dikembalikan, karena
+      // barang secara fisik memang sudah tidak ada.
+      if (newStatus === 'returned' && loan.status !== 'returned' && loan.loan_item_id) {
+        const currentItem = loanItems.find((li) => li.id === loan.loan_item_id);
+        if (currentItem) {
+          const { error: stockError } = await supabase
+            .from('loan_items')
+            .update({ stock: currentItem.stock + loan.quantity })
+            .eq('id', loan.loan_item_id);
+          if (stockError) {
+            console.error('Stock increment error:', stockError);
+          }
+        }
+      }
+
       toast({
         title: 'Berhasil',
         description: newStatus === 'returned' ? 'Barang dicatat sudah dikembalikan' : 'Status peminjaman diperbarui',
