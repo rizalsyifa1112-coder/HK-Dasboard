@@ -22,6 +22,10 @@ import {
   type AssignmentAmenityUsage, type AssignmentLinenUsage,
 } from '@/lib/types';
 
+// ⬅️ BARU: status yang dianggap "sudah pasti checkout" begitu staff mulai bekerja
+const HK_START_STATUS: Record<string, string> = {
+  expected_departure: 'vacant_dirty',
+};
 // ⬅️ BARU: mapping status kotor → bersih saat cleaning selesai
 const DIRTY_TO_CLEAN: Record<string, string> = {
   vacant_dirty: 'vacant_clean',
@@ -107,26 +111,38 @@ export default function AssignmentDetailPage() {
   }, [assignment?.status]);
 
   const handleStart = async () => {
-    if (!assignment) return;
-    setStarting(true);
-    try {
-      const { error } = await supabase
-        .from('assignments')
-        .update({
-          status: 'in_progress',
-          started_at: new Date().toISOString(),
-          hk_status_in: assignment.room?.housekeeping_status ?? null,
-        })
-        .eq('id', assignment.id);
-      if (error) throw error;
-      toast({ title: 'Started', description: 'Cleaning started — timer is running' });
-      fetchAll();
-    } catch (err) {
-      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
-    } finally {
-      setStarting(false);
+  if (!assignment) return;
+  setStarting(true);
+  try {
+    const currentStatus = assignment.room?.housekeeping_status ?? '';
+    const startStatus = HK_START_STATUS[currentStatus] ?? currentStatus; // ⬅️ BARU: terjemahkan ED → VD
+
+    const { error } = await supabase
+      .from('assignments')
+      .update({
+        status: 'in_progress',
+        started_at: new Date().toISOString(),
+        hk_status_in: startStatus, // ⬅️ BARU: pakai hasil terjemahan, bukan status mentah
+      })
+      .eq('id', assignment.id);
+    if (error) throw error;
+
+    // ⬅️ BARU: sinkronkan juga status kamar aslinya supaya konsisten di seluruh dashboard
+    if (assignment.room_id && startStatus !== currentStatus) {
+      await supabase
+        .from('rooms')
+        .update({ housekeeping_status: startStatus })
+        .eq('id', assignment.room_id);
     }
-  };
+
+    toast({ title: 'Started', description: 'Cleaning started — timer is running' });
+    fetchAll();
+  } catch (err) {
+    toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+  } finally {
+    setStarting(false);
+  }
+};
 
   const handleFinish = async () => {
     if (!assignment) return;
