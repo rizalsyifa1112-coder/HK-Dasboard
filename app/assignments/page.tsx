@@ -30,9 +30,8 @@ import {
   CheckCircle2, PlayCircle, Pencil, X,
 } from 'lucide-react';
 import {
-  PRIORITY_LABELS, PRIORITY_COLORS,
   HOUSEKEEPING_STATUS_LABELS, HOUSEKEEPING_STATUS_COLORS,
-  type Assignment, type Room, type Profile, type Priority, type Floor, type RoomType,
+  type Assignment, type Room, type Profile, type Floor, type RoomType,
 } from '@/lib/types';
 
 const ASSIGNMENT_STATUS_LABELS: Record<Assignment['status'], string> = {
@@ -47,14 +46,6 @@ const ASSIGNMENT_STATUS_COLORS: Record<Assignment['status'], string> = {
   in_progress: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   completed: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
   cancelled: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
-};
-
-const TASK_TYPE_LABELS: Record<Assignment['task_type'], string> = {
-  cleaning: 'Cleaning',
-  turndown: 'Turndown',
-  deep_clean: 'Deep Clean',
-  checkout: 'Checkout',
-  vacant: 'Vacant',
 };
 
 // ⬅️ BARU: helper untuk hitung batas "hari ini" berdasarkan zona waktu WIB (UTC+7),
@@ -153,6 +144,38 @@ export default function AssignmentsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // ⬅️ BARU: dengarkan perubahan status kamar secara realtime, supaya panel
+  // staff & supervisor otomatis update begitu status kamar berubah di halaman
+  // Room Status (tanpa perlu klik Refresh manual).
+  useEffect(() => {
+    const channel = supabase
+      .channel('room-status-sync-assignments')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'rooms' },
+        (payload) => {
+          const updatedRoom = payload.new as Room;
+
+          setRooms((prev) =>
+            prev.map((r) => (r.id === updatedRoom.id ? { ...r, ...updatedRoom } : r))
+          );
+
+          setAssignments((prev) =>
+            prev.map((a) =>
+              a.room_id === updatedRoom.id
+                ? { ...a, room: a.room ? { ...a.room, ...updatedRoom } : a.room }
+                : a
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const filtered = assignments.filter((a) => {
     // ⬅️ Opsi A: assignment cancelled tidak pernah ditampilkan sama sekali,
@@ -432,8 +455,7 @@ export default function AssignmentsPage() {
               <TableRow>
                 <TableHead>Room</TableHead>
                 <TableHead>Staff</TableHead>
-                <TableHead>Task Type</TableHead>
-                <TableHead>Priority</TableHead>
+                <TableHead>Room Status</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Assigned</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -445,17 +467,16 @@ export default function AssignmentsPage() {
                   <TableCell className="font-medium">{a.room?.number ?? '-'}</TableCell>
                   <TableCell>{a.staff?.full_name ?? 'Unassigned'}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-xs">
-                      {TASK_TYPE_LABELS[a.task_type]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn('text-xs', PRIORITY_COLORS[a.priority])}
-                    >
-                      {PRIORITY_LABELS[a.priority]}
-                    </Badge>
+                    {a.room ? (
+                      <Badge
+                        variant="outline"
+                        className={cn('text-xs', HOUSEKEEPING_STATUS_COLORS[a.room.housekeeping_status])}
+                      >
+                        {HOUSEKEEPING_STATUS_LABELS[a.room.housekeeping_status]}
+                      </Badge>
+                    ) : (
+                      '-'
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge
