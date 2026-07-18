@@ -16,12 +16,18 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'; {/* ⬅️ BARU */}
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2, CheckCircle2, PlayCircle,
+  Search, RefreshCw, Download, Plus, Filter, ClipboardList, Loader2,
+  CheckCircle2, PlayCircle, Pencil, X, // ⬅️ BARU: Pencil, X
 } from 'lucide-react';
 import {
   PRIORITY_LABELS, PRIORITY_COLORS,
@@ -69,10 +75,21 @@ export default function AssignmentsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   // Bulk-assign table state: roomId -> selected staffId
   const [roomAssignments, setRoomAssignments] = useState<Record<string, string>>({});
   const [tableSearch, setTableSearch] = useState('');
+
+  // ⬅️ BARU: state untuk edit assignment
+  const [editTarget, setEditTarget] = useState<Assignment | null>(null);
+  const [editRoomId, setEditRoomId] = useState('');
+  const [editStaffId, setEditStaffId] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  // ⬅️ BARU: state untuk cancel/delete assignment
+  const [cancelTarget, setCancelTarget] = useState<Assignment | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const canManage = profile?.role === 'admin' || profile?.role === 'supervisor';
   const isHousekeeping = profile?.role === 'housekeeping';
@@ -122,7 +139,6 @@ export default function AssignmentsPage() {
     return matchSearch && matchStatus;
   });
 
-  // Group rooms by floor for the bulk assignment table
   const roomsByFloor = useMemo(() => {
     const q = tableSearch.toLowerCase();
     const filteredRooms = rooms.filter((r) => {
@@ -211,6 +227,83 @@ export default function AssignmentsPage() {
     }
   };
 
+  const handleManualSync = async () => {
+    setSyncing(true);
+    try {
+      const completed = assignments.filter((a) => a.status === 'completed');
+      if (completed.length === 0) {
+        toast({ title: 'Tidak ada data', description: 'Belum ada assignment yang completed' });
+        return;
+      }
+      for (const a of completed) {
+        await fetch('/api/sync-assignment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignmentId: a.id }),
+        });
+      }
+      toast({ title: 'Synced', description: `${completed.length} assignment berhasil disync ulang` });
+    } catch (err) {
+      console.error('Manual sync error:', err);
+      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // ⬅️ BARU: buka dialog edit, isi form dengan data assignment saat ini
+  const openEdit = (a: Assignment) => {
+    setEditTarget(a);
+    setEditRoomId(a.room_id);
+    setEditStaffId(a.staff_id ?? '');
+  };
+
+  // ⬅️ BARU: simpan perubahan room/staff assignment
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    if (!editRoomId || !editStaffId) {
+      toast({ title: 'Validation', description: 'Room dan staff harus dipilih', variant: 'destructive' });
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const { error } = await supabase
+        .from('assignments')
+        .update({ room_id: editRoomId, staff_id: editStaffId })
+        .eq('id', editTarget.id);
+      if (error) throw error;
+      toast({ title: 'Updated', description: 'Assignment berhasil diperbarui' });
+      setEditTarget(null);
+      fetchData();
+    } catch (err) {
+      console.error('Edit error:', err);
+      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // ⬅️ BARU: batalkan assignment (set status jadi cancelled)
+  const handleCancelConfirm = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      const { error } = await supabase
+        .from('assignments')
+        .update({ status: 'cancelled' })
+        .eq('id', cancelTarget.id);
+      if (error) throw error;
+      toast({ title: 'Cancelled', description: 'Assignment dibatalkan' });
+      setCancelTarget(null);
+      fetchData();
+    } catch (err) {
+      console.error('Cancel error:', err);
+      toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
@@ -226,8 +319,13 @@ export default function AssignmentsPage() {
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
             {canManage && (
-              <Button variant="outline" size="sm">
-                <Download className="mr-2 h-4 w-4" /> Sync Spreadsheet
+              <Button variant="outline" size="sm" onClick={handleManualSync} disabled={syncing}>
+                {syncing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Sync Spreadsheet
               </Button>
             )}
             {canManage && (
@@ -239,7 +337,6 @@ export default function AssignmentsPage() {
         }
       />
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -264,7 +361,6 @@ export default function AssignmentsPage() {
         </Select>
       </div>
 
-      {/* Table */}
       {loading ? (
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -349,7 +445,7 @@ export default function AssignmentsPage() {
                       <span className="text-xs text-muted-foreground">No action</span>
                     )}
                     {canManage && (
-                      <div className="flex justify-end gap-1 flex-wrap">
+                      <div className="flex justify-end gap-1 flex-wrap items-center">
                         <Button
                           variant="outline"
                           size="sm"
@@ -358,6 +454,30 @@ export default function AssignmentsPage() {
                         >
                           View
                         </Button>
+                        {/* ⬅️ BARU: tombol edit (pencil), hanya untuk assignment yang belum completed */}
+                        {a.status !== 'completed' && (
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => openEdit(a)}
+                            title="Edit assignment"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {/* ⬅️ BARU: tombol cancel (x), hanya kalau belum cancelled */}
+                        {a.status !== 'cancelled' && a.status !== 'completed' && (
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => setCancelTarget(a)}
+                            title="Cancel assignment"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         {(Object.keys(ASSIGNMENT_STATUS_LABELS) as Assignment['status'][]).map((s) => (
                           <Button
                             key={s}
@@ -381,7 +501,7 @@ export default function AssignmentsPage() {
         </div>
       )}
 
-      {/* Bulk Assignment Dialog: all rooms grouped by floor, with staff select per room */}
+      {/* Bulk Assignment Dialog */}
       {canManage && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
@@ -479,6 +599,75 @@ export default function AssignmentsPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* ⬅️ BARU: Edit Assignment Dialog */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Edit Assignment</DialogTitle>
+            <DialogDescription>
+              Ubah kamar atau staff untuk assignment ini.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">Room</p>
+              <Select value={editRoomId} onValueChange={setEditRoomId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select room" />
+                </SelectTrigger>
+                <SelectContent>
+                  {rooms.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.number} {r.floor?.name ? `— ${r.floor.name}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">Staff</p>
+              <Select value={editStaffId} onValueChange={setEditStaffId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select staff" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staff.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={editSaving}>
+              {editSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ⬅️ BARU: Cancel Confirmation */}
+      <AlertDialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Batalkan assignment ini?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Assignment untuk kamar {cancelTarget?.room?.number ?? '-'} akan ditandai sebagai cancelled.
+              Tindakan ini tidak menghapus data, hanya mengubah status.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelling}>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCancelConfirm} disabled={cancelling}>
+              {cancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Ya, Batalkan
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
