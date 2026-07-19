@@ -41,7 +41,7 @@ const STATUS_COLORS: Record<LinenItem['status'], string> = {
 // ⬅️ BARU: default status untuk item BARU langsung "sent_to_laundry"
 // (karena input pertama sudah pasti kondisinya baru dikirim ke laundry)
 const emptyForm = {
-  code: 'BT',
+  code: '',
   item_type: 'BT' as LinenItem['item_type'],
   status: 'sent_to_laundry' as LinenItem['status'],
   notes: '',
@@ -115,13 +115,13 @@ export default function LinenTrackingPage() {
   // - Bath Towel (BT) -> auto-isi "BT"
   // - Bath Mat (BM) -> dikosongkan (tidak perlu hapus manual lagi)
   const handleItemTypeChange = (v: string) => {
-    const type = v as LinenItem['item_type'];
-    setForm((prev) => ({
-      ...prev,
-      item_type: type,
-      code: type === 'BT' ? 'BT' : '',
-    }));
-  };
+  const type = v as LinenItem['item_type'];
+  setForm((prev) => ({
+    ...prev,
+    item_type: type,
+    code: '',
+  }));
+};
 
   const handleSave = async () => {
     if (!form.code.trim()) {
