@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google';
 import { ThemeProvider } from '@/lib/theme-provider';
 import { AuthProvider } from '@/lib/auth-context';
 import { AppShell } from '@/components/app-shell';
+import { ServiceWorkerRegister } from '@/components/service-worker-register';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -33,6 +34,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className} suppressHydrationWarning>
+        <ServiceWorkerRegister />
         <ThemeProvider>
           <AuthProvider>
             <AppShell>{children}</AppShell>
