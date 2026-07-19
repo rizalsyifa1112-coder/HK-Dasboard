@@ -21,7 +21,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil, Undo2 } from 'lucide-react';
+import { Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil, Undo2, Send, CheckCircle2 } from 'lucide-react';
 import type { LinenItem } from '@/lib/types';
 
 const STATUS_LABELS: Record<LinenItem['status'], string> = {
@@ -38,10 +38,12 @@ const STATUS_COLORS: Record<LinenItem['status'], string> = {
   lost: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
 };
 
+// ⬅️ BARU: default status untuk item BARU langsung "sent_to_laundry"
+// (karena input pertama sudah pasti kondisinya baru dikirim ke laundry)
 const emptyForm = {
-  code: '',
+  code: 'BT',
   item_type: 'BT' as LinenItem['item_type'],
-  status: 'available' as LinenItem['status'],
+  status: 'sent_to_laundry' as LinenItem['status'],
   notes: '',
 };
 
@@ -57,7 +59,6 @@ export default function LinenTrackingPage() {
   const [editingItem, setEditingItem] = useState<LinenItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
-  // ⬅️ BARU: state loading khusus untuk tombol quick-action (Return) per baris
   const [quickUpdatingId, setQuickUpdatingId] = useState<string | null>(null);
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'order_taker';
@@ -110,6 +111,18 @@ export default function LinenTrackingPage() {
     setDialogOpen(true);
   };
 
+  // ⬅️ BARU: saat Item Type diganti, kolom Code otomatis mengikuti:
+  // - Bath Towel (BT) -> auto-isi "BT"
+  // - Bath Mat (BM) -> dikosongkan (tidak perlu hapus manual lagi)
+  const handleItemTypeChange = (v: string) => {
+    const type = v as LinenItem['item_type'];
+    setForm((prev) => ({
+      ...prev,
+      item_type: type,
+      code: type === 'BT' ? 'BT' : '',
+    }));
+  };
+
   const handleSave = async () => {
     if (!form.code.trim()) {
       toast({ title: 'Validation', description: 'Code is required', variant: 'destructive' });
@@ -142,8 +155,6 @@ export default function LinenTrackingPage() {
     }
   };
 
-  // ⬅️ BARU: tombol cepat "Return" — langsung set status jadi "returned"
-  // tanpa perlu buka dialog Edit. Hanya tampil kalau status saat ini "sent_to_laundry".
   const handleQuickReturn = async (item: LinenItem) => {
     setQuickUpdatingId(item.id);
     try {
@@ -318,7 +329,7 @@ export default function LinenTrackingPage() {
               <Label>Item Type</Label>
               <Select
                 value={form.item_type}
-                onValueChange={(v) => setForm({ ...form, item_type: v as LinenItem['item_type'], code: v })}
+                onValueChange={handleItemTypeChange}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -335,25 +346,58 @@ export default function LinenTrackingPage() {
                 id="code"
                 value={form.code}
                 onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                placeholder="BT001"
+                placeholder={form.item_type === 'BT' ? 'BT001' : '001'}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Status</Label>
-              <Select
-                value={form.status}
-                onValueChange={(v) => setForm({ ...form, status: v as LinenItem['status'] })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(STATUS_LABELS) as LinenItem['status'][]).map((s) => (
-                    <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+
+            {/* ⬅️ BARU: untuk item BARU, status cukup 2 tombol cepat (bukan dropdown) */}
+            {!editingItem ? (
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={form.status === 'sent_to_laundry' ? 'default' : 'outline'}
+                    className={cn(
+                      'h-11',
+                      form.status !== 'sent_to_laundry' && STATUS_COLORS.sent_to_laundry
+                    )}
+                    onClick={() => setForm({ ...form, status: 'sent_to_laundry' })}
+                  >
+                    <Send className="mr-2 h-4 w-4" /> Sent to Laundry
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={form.status === 'returned' ? 'default' : 'outline'}
+                    className={cn(
+                      'h-11',
+                      form.status !== 'returned' && STATUS_COLORS.returned
+                    )}
+                    onClick={() => setForm({ ...form, status: 'returned' })}
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" /> Returned
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => setForm({ ...form, status: v as LinenItem['status'] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(STATUS_LABELS) as LinenItem['status'][]).map((s) => (
+                      <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
               <Textarea
