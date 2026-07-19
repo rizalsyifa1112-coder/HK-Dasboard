@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
@@ -21,7 +21,9 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil, Undo2, Send, CheckCircle2 } from 'lucide-react';
+import {
+  Search, RefreshCw, Plus, Filter, Layers, Loader2, Pencil, Undo2, Send, CheckCircle2, CalendarDays, History,
+} from 'lucide-react';
 import type { LinenItem } from '@/lib/types';
 
 const STATUS_LABELS: Record<LinenItem['status'], string> = {
@@ -38,13 +40,28 @@ const STATUS_COLORS: Record<LinenItem['status'], string> = {
   lost: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
 };
 
-// ⬅️ BARU: default status untuk item BARU langsung "sent_to_laundry"
-// (karena input pertama sudah pasti kondisinya baru dikirim ke laundry)
 const emptyForm = {
   code: '',
   item_type: 'BT' as LinenItem['item_type'],
   status: 'sent_to_laundry' as LinenItem['status'],
   notes: '',
+};
+
+// ⬅️ BARU: helper untuk ambil tanggal lokal format YYYY-MM-DD (bukan UTC, biar sesuai jam lokal)
+const getTodayLocal = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const toLocalDateString = (iso: string) => {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
 export default function LinenTrackingPage() {
@@ -60,6 +77,11 @@ export default function LinenTrackingPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
   const [quickUpdatingId, setQuickUpdatingId] = useState<string | null>(null);
+
+  // ⬅️ BARU: state filter tanggal — default hari ini, dan flag apakah user sudah pilih tanggal manual
+  const [dateFilter, setDateFilter] = useState(getTodayLocal());
+  const [isManualDate, setIsManualDate] = useState(false);
+  const [showAllDates, setShowAllDates] = useState(false);
 
   const canEdit = profile?.role === 'admin' || profile?.role === 'order_taker';
 
@@ -82,17 +104,46 @@ export default function LinenTrackingPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filtered = items.filter((i) => {
-    const matchSearch = i.code.toLowerCase().includes(search.toLowerCase());
-    const matchType = typeFilter === 'all' || i.item_type === typeFilter;
-    const matchStatus = statusFilter === 'all' || i.status === statusFilter;
-    return matchSearch && matchType && matchStatus;
-  });
+  // ⬅️ BARU: setiap menit cek apakah tanggal sudah ganti (lewat tengah malam).
+  // Kalau user belum pernah pilih tanggal manual, otomatis geser filter ke hari baru.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const today = getTodayLocal();
+      if (!isManualDate && dateFilter !== today) {
+        setDateFilter(today);
+      }
+    }, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isManualDate, dateFilter]);
+
+  const filtered = useMemo(() => {
+    return items.filter((i) => {
+      const matchSearch = i.code.toLowerCase().includes(search.toLowerCase());
+      const matchType = typeFilter === 'all' || i.item_type === typeFilter;
+      const matchStatus = statusFilter === 'all' || i.status === statusFilter;
+      const matchDate = showAllDates || toLocalDateString(i.updated_at) === dateFilter;
+      return matchSearch && matchType && matchStatus && matchDate;
+    });
+  }, [items, search, typeFilter, statusFilter, dateFilter, showAllDates]);
 
   const btCount = items.filter((i) => i.item_type === 'BT').length;
   const bmCount = items.filter((i) => i.item_type === 'BM').length;
   const lostCount = items.filter((i) => i.status === 'lost').length;
   const sentCount = items.filter((i) => i.status === 'sent_to_laundry').length;
+
+  const isToday = dateFilter === getTodayLocal();
+
+  const handleDateChange = (value: string) => {
+    setDateFilter(value);
+    setIsManualDate(value !== getTodayLocal());
+    setShowAllDates(false);
+  };
+
+  const jumpToToday = () => {
+    setDateFilter(getTodayLocal());
+    setIsManualDate(false);
+    setShowAllDates(false);
+  };
 
   const openCreate = () => {
     setEditingItem(null);
@@ -111,17 +162,14 @@ export default function LinenTrackingPage() {
     setDialogOpen(true);
   };
 
-  // ⬅️ BARU: saat Item Type diganti, kolom Code otomatis mengikuti:
-  // - Bath Towel (BT) -> auto-isi "BT"
-  // - Bath Mat (BM) -> dikosongkan (tidak perlu hapus manual lagi)
   const handleItemTypeChange = (v: string) => {
-  const type = v as LinenItem['item_type'];
-  setForm((prev) => ({
-    ...prev,
-    item_type: type,
-    code: '',
-  }));
-};
+    const type = v as LinenItem['item_type'];
+    setForm((prev) => ({
+      ...prev,
+      item_type: type,
+      code: '',
+    }));
+  };
 
   const handleSave = async () => {
     if (!form.code.trim()) {
@@ -191,7 +239,7 @@ export default function LinenTrackingPage() {
         }
       />
 
-      {/* Summary */}
+      {/* Summary (selalu total keseluruhan, tidak terpengaruh filter tanggal) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Bath Towel (BT)', value: btCount, color: 'text-primary' },
@@ -206,6 +254,40 @@ export default function LinenTrackingPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* ⬅️ BARU: Date filter bar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border p-3 bg-muted/30">
+        <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
+        <Label className="text-sm font-medium mr-1">Tanggal:</Label>
+        <Input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => handleDateChange(e.target.value)}
+          className="w-[160px] h-8"
+          disabled={showAllDates}
+        />
+        {!isToday && !showAllDates && (
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={jumpToToday}>
+            Kembali ke Hari Ini
+          </Button>
+        )}
+        <Button
+          variant={showAllDates ? 'default' : 'outline'}
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setShowAllDates((v) => !v)}
+        >
+          <History className="mr-1.5 h-3 w-3" />
+          {showAllDates ? 'Tampilkan Per Tanggal' : 'Lihat Semua Riwayat'}
+        </Button>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {showAllDates
+            ? `Menampilkan semua data (${filtered.length} item)`
+            : isToday
+              ? `Menampilkan aktivitas hari ini (${filtered.length} item)`
+              : `Menampilkan aktivitas tanggal terpilih (${filtered.length} item)`}
+        </span>
       </div>
 
       {/* Filters */}
@@ -254,7 +336,11 @@ export default function LinenTrackingPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Layers className="h-10 w-10 mb-2 opacity-40" />
-            <p>No items found</p>
+            <p>
+              {showAllDates
+                ? 'No items found'
+                : 'Belum ada aktivitas pada tanggal ini. Coba "Lihat Semua Riwayat".'}
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -350,7 +436,6 @@ export default function LinenTrackingPage() {
               />
             </div>
 
-            {/* ⬅️ BARU: untuk item BARU, status cukup 2 tombol cepat (bukan dropdown) */}
             {!editingItem ? (
               <div className="space-y-1.5">
                 <Label>Status</Label>
