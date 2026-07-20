@@ -19,11 +19,11 @@ import {
 import {
   RefreshCw, Download, FileSpreadsheet, FileText, BedDouble,
   CheckCircle2, ClipboardCheck, Shirt, Layers, TrendingUp,
-  Sparkles, CalendarRange,
+  Sparkles, CalendarRange, Timer,
 } from 'lucide-react';
 import {
   HOUSEKEEPING_STATUS_LABELS,
-  type Room, type Assignment, type Inspection, type LaundryOrder, type LinenInventory,
+  type Room, type Assignment, type Inspection, type LaundryOrder, type LinenInventory, type Profile,
 } from '@/lib/types';
 
 type RangeKey = 'today' | 'week' | 'month';
@@ -36,6 +36,11 @@ const RANGE_LABELS: Record<RangeKey, string> = {
 
 const PIE_COLORS = ['#ef4444', '#10b981', '#3b82f6', '#f59e0b', '#64748b', '#71717a'];
 
+// ⬅️ BARU: ambang batas warna batang performance (dalam menit rata-rata per kamar).
+// Di bawah 30 menit = cepat (hijau), 30-45 = sedang (amber), di atas 45 = lambat (merah).
+const PERF_FAST_THRESHOLD = 30;
+const PERF_SLOW_THRESHOLD = 45;
+
 interface ReportStats {
   totalRooms: number;
   occupiedCount: number;
@@ -46,13 +51,15 @@ interface ReportStats {
   linenParCompliance: number;
 }
 
+type AssignmentWithStaff = Assignment & { staff?: Profile | null };
+
 export default function ReportsPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const [range, setRange] = useState<RangeKey>('week');
   const [loading, setLoading] = useState(true);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentWithStaff[]>([]);
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [laundry, setLaundry] = useState<LaundryOrder[]>([]);
   const [linen, setLinen] = useState<LinenInventory[]>([]);
@@ -62,14 +69,18 @@ export default function ReportsPage() {
     try {
       const [roomsRes, assignmentsRes, inspectionsRes, laundryRes, linenRes] = await Promise.all([
         supabase.from('rooms').select('*'),
-        supabase.from('assignments').select('*').order('created_at', { ascending: false }),
+        // ⬅️ BARU: join ke staff (profiles) supaya nama staff tersedia untuk chart performance
+        supabase
+          .from('assignments')
+          .select('*, staff:profiles(*)')
+          .order('created_at', { ascending: false }),
         supabase.from('inspections').select('*').order('created_at', { ascending: false }),
         supabase.from('laundry_orders').select('*').order('created_at', { ascending: false }),
         supabase.from('linen_inventory').select('*'),
       ]);
 
       setRooms((roomsRes.data as Room[]) || []);
-      setAssignments((assignmentsRes.data as Assignment[]) || []);
+      setAssignments((assignmentsRes.data as AssignmentWithStaff[]) || []);
       setInspections((inspectionsRes.data as Inspection[]) || []);
       setLaundry((laundryRes.data as LaundryOrder[]) || []);
       setLinen((linenRes.data as LinenInventory[]) || []);
@@ -179,33 +190,42 @@ export default function ReportsPage() {
     return Object.values(buckets);
   }, [rangeAssignments]);
 
-  const inspectionScoreData = useMemo(() => {
-    // Average inspection score per day
-    const buckets: Record<string, { name: string; scores: number[] }> = {};
-    rangeInspections.forEach((i) => {
-      if (i.score == null) return;
-      const d = new Date(i.created_at);
-      const key = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      if (!buckets[key]) buckets[key] = { name: key, scores: [] };
-      buckets[key].scores.push(i.score);
-    });
-    return Object.values(buckets).map((b) => ({
-      name: b.name,
-      Score: Math.round(b.scores.reduce((s, v) => s + v, 0) / b.scores.length),
-    }));
-  }, [rangeInspections]);
+  // ⬅️ BARU: Housekeeping Performance — rata-rata durasi pengerjaan (menit) per staff,
+  // dihitung dari started_at ke completed_at, hanya assignment yang sudah completed,
+  // dan hanya dalam rentang tanggal yang dipilih (ikut bertambah/berubah tiap hari
+  // sesuai filter This Week/This Month di atas). Batang paling tinggi = staff paling lambat.
+  const performanceData = useMemo(() => {
+    const byStaff: Record<string, { name: string; totalMinutes: number; roomCount: number }> = {};
 
-  const linenChartData = useMemo(
-    () =>
-      linen.slice(0, 8).map((l) => ({
-        name: l.item_name.length > 12 ? l.item_name.slice(0, 10) + '…' : l.item_name,
-        InStock: l.quantity_in_stock,
-        InUse: l.quantity_in_use,
-        Dirty: l.quantity_dirty,
-        Par: l.par_level,
-      })),
-    [linen]
-  );
+    rangeAssignments.forEach((a) => {
+      if (a.status !== 'completed' || !a.started_at || !a.completed_at || !a.staff_id) return;
+      const start = new Date(a.started_at).getTime();
+      const end = new Date(a.completed_at).getTime();
+      const minutes = Math.max(0, (end - start) / (1000 * 60));
+
+      const staffName = a.staff?.full_name ?? 'Unknown';
+      if (!byStaff[a.staff_id]) {
+        byStaff[a.staff_id] = { name: staffName, totalMinutes: 0, roomCount: 0 };
+      }
+      byStaff[a.staff_id].totalMinutes += minutes;
+      byStaff[a.staff_id].roomCount += 1;
+    });
+
+    return Object.values(byStaff)
+      .map((s) => ({
+        name: s.name,
+        AvgMinutes: Math.round(s.totalMinutes / s.roomCount),
+        Rooms: s.roomCount,
+      }))
+      // ⬅️ urut dari yang paling lambat (batang tertinggi) ke paling cepat
+      .sort((a, b) => b.AvgMinutes - a.AvgMinutes);
+  }, [rangeAssignments]);
+
+  const performanceBarColor = (minutes: number) => {
+    if (minutes <= PERF_FAST_THRESHOLD) return '#10b981'; // hijau — cepat
+    if (minutes <= PERF_SLOW_THRESHOLD) return '#f59e0b'; // amber — sedang
+    return '#ef4444'; // merah — lambat
+  };
 
   const handleExport = (format: 'csv' | 'excel' | 'sheets') => {
     toast({
@@ -447,69 +467,60 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Charts row 2 */}
+      {/* Charts row 2 — ⬅️ BARU: Housekeeping Performance menggantikan Inspection Scores & Linen Inventory Status */}
       {loading ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="h-72 rounded-lg bg-muted animate-pulse" />
-          ))}
-        </div>
+        <div className="h-80 rounded-lg bg-muted animate-pulse" />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Inspection scores */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Inspection Scores</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {inspectionScoreData.length === 0 ? (
-                <EmptyChart label="No inspections in range" />
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={inspectionScoreData}>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Timer className="h-4 w-4 text-muted-foreground" />
+              Housekeeping Performance
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Rata-rata waktu pengerjaan per kamar (menit) untuk setiap staff — batang paling tinggi = paling lambat.
+              Data mengikuti rentang tanggal ({RANGE_LABELS[range]}) dan bertambah otomatis setiap hari.
+            </p>
+          </CardHeader>
+          <CardContent>
+            {performanceData.length === 0 ? (
+              <EmptyChart label="Belum ada assignment yang selesai dalam rentang ini" />
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={performanceData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="Score" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <YAxis
+                      tick={{ fontSize: 12 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      label={{ value: 'Menit', angle: -90, position: 'insideLeft', fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      formatter={(value: number, name: string, item: any) => {
+                        if (name === 'AvgMinutes') {
+                          return [`${value} menit/kamar (${item.payload.Rooms} kamar)`, 'Rata-rata durasi'];
+                        }
+                        return [value, name];
+                      }}
+                    />
+                    <Bar dataKey="AvgMinutes" radius={[4, 4, 0, 0]}>
+                      {performanceData.map((entry, index) => (
+                        <Cell key={`perf-cell-${index}`} fill={performanceBarColor(entry.AvgMinutes)} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Linen status */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Linen Inventory Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {linenChartData.length === 0 ? (
-                <EmptyChart label="No linen inventory data" />
-              ) : (
-                <>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={linenChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" angle={-15} textAnchor="end" height={50} />
-                      <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Bar dataKey="InStock" stackId="a" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="InUse" stackId="a" fill="#f59e0b" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="Dirty" stackId="a" fill="#ef4444" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="Par" fill="none" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                  <div className="flex flex-wrap gap-3 justify-center mt-2">
-                    <Legend color="#3b82f6" label="In Stock" />
-                    <Legend color="#f59e0b" label="In Use" />
-                    <Legend color="#ef4444" label="Dirty" />
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                <div className="flex flex-wrap gap-3 justify-center mt-3">
+                  <Legend color="#10b981" label={`Cepat (≤${PERF_FAST_THRESHOLD} menit)`} />
+                  <Legend color="#f59e0b" label={`Sedang (${PERF_FAST_THRESHOLD}-${PERF_SLOW_THRESHOLD} menit)`} />
+                  <Legend color="#ef4444" label={`Lambat (>${PERF_SLOW_THRESHOLD} menit)`} />
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Footer note */}
