@@ -361,14 +361,17 @@ export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
   off_market: 'Off Market',
 };
 
+// ⬅️ DIUBAH: warna "Vacant Clean Uncheck" dan "Expected Departure" dibuat lebih
+// pekat/kontras (opacity & saturasi dinaikkan + font-semibold) supaya jelas
+// beda dan tidak kelihatan mirip pudar di tema gelap. Status lain tidak disentuh.
 export const HOUSEKEEPING_STATUS_COLORS: Record<HousekeepingStatus, string> = {
   vacant_dirty: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
-  vacant_clean_unchecked: 'bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30',
+  vacant_clean_unchecked: 'bg-orange-500/25 text-orange-700 dark:text-orange-300 border-orange-500/50 font-semibold',
   vacant_clean: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
   vacant_clean_inspected: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   occupied_clean: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30',
   occupied_dirty: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
-  expected_departure: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+  expected_departure: 'bg-violet-500/25 text-violet-700 dark:text-violet-300 border-violet-500/50 font-semibold',
   out_of_order: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/30',
   off_market: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30',
 };
