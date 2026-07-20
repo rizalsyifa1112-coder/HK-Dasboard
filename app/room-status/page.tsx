@@ -25,6 +25,28 @@ import {
   type Room, type Floor, type RoomType, type HousekeepingStatus,
 } from '@/lib/types';
 
+// ⬅️ BARU: helper WIB (sama seperti di Assignments/Inspection) — dipakai untuk
+// menentukan apakah remarks kamar masih "berlaku hari ini" atau sudah lewat
+// hari (otomatis dianggap kosong tanpa perlu dihapus manual).
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function getTodayRangeWIB() {
+  const nowWIB = new Date(Date.now() + WIB_OFFSET_MS);
+  const y = nowWIB.getUTCFullYear();
+  const m = nowWIB.getUTCMonth();
+  const d = nowWIB.getUTCDate();
+  const todayStart = new Date(Date.UTC(y, m, d, 0, 0, 0) - WIB_OFFSET_MS);
+  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+  return { todayStart, todayEnd };
+}
+
+function isNoteFreshToday(notesSetAt: string | null | undefined): boolean {
+  if (!notesSetAt) return false;
+  const { todayStart, todayEnd } = getTodayRangeWIB();
+  const t = new Date(notesSetAt).getTime();
+  return t >= todayStart.getTime() && t < todayEnd.getTime();
+}
+
 export default function RoomStatusPage() {
   const { profile } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -70,8 +92,11 @@ export default function RoomStatusPage() {
 
   // ⬅️ BARU: setiap kali dialog dibuka untuk kamar berbeda, reset draft remarks
   // ke isi notes kamar tersebut yang tersimpan di database
+  // ⬅️ DIUBAH: kalau remarks yang tersimpan sudah bukan dari hari ini (WIB),
+  // dianggap kadaluarsa — draft dimulai kosong, bukan menampilkan catatan lama
   useEffect(() => {
-    setRemarksDraft(selectedRoom?.notes ?? '');
+    const stillFresh = isNoteFreshToday(selectedRoom?.notes_set_at);
+    setRemarksDraft(stillFresh ? selectedRoom?.notes ?? '' : '');
   }, [selectedRoom?.id]);
 
   const filteredRooms = rooms.filter((r) => {
@@ -123,19 +148,28 @@ export default function RoomStatusPage() {
   };
 
   // ⬅️ BARU: simpan remarks manual ke kolom notes
+  // ⬅️ DIUBAH: sekarang juga men-set notes_set_at = waktu sekarang, supaya
+  // remarks ini otomatis "kadaluarsa" begitu lewat jam 00:00 WIB berikutnya
   const handleSaveRemarks = async () => {
     if (!selectedRoom) return;
     setSavingRemarks(true);
     try {
+      const trimmed = remarksDraft.trim();
       const { error } = await supabase
         .from('rooms')
-        .update({ notes: remarksDraft.trim() || null })
+        .update({
+          notes: trimmed || null,
+          notes_set_at: trimmed ? new Date().toISOString() : null,
+        })
         .eq('id', selectedRoom.id);
       if (error) throw error;
 
       await fetchData();
-      // update juga state selectedRoom yang lagi terbuka, supaya UI langsung sinkron
-      setSelectedRoom((prev) => (prev ? { ...prev, notes: remarksDraft.trim() || null } : prev));
+      setSelectedRoom((prev) =>
+        prev
+          ? { ...prev, notes: trimmed || null, notes_set_at: trimmed ? new Date().toISOString() : null }
+          : prev
+      );
     } catch (err) {
       console.error('Error saving remarks:', err);
     } finally {
@@ -326,35 +360,6 @@ export default function RoomStatusPage() {
                       : 'N/A'}
                   </p>
                 </div>
-
-                {/* ⬅️ BARU: field Remarks — admin/supervisor bisa ketik manual & simpan,
-                    role lain (kalau canEdit tapi bukan admin/supervisor) cuma bisa lihat */}
-                <div className="col-span-2 space-y-1.5">
-                  <p className="text-xs text-muted-foreground">Remarks</p>
-                  {canEditRemarks ? (
-                    <>
-                      <Textarea
-                        value={remarksDraft}
-                        onChange={(e) => setRemarksDraft(e.target.value)}
-                        placeholder="Tulis catatan untuk kamar ini..."
-                        rows={3}
-                        className="text-sm"
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          onClick={handleSaveRemarks}
-                          disabled={savingRemarks || remarksDraft === (selectedRoom.notes ?? '')}
-                        >
-                          {savingRemarks && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          Save Remarks
-                        </Button>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm">{selectedRoom.notes || '-'}</p>
-                  )}
-                </div>
               </div>
 
               {canEdit && (
@@ -379,6 +384,44 @@ export default function RoomStatusPage() {
                   </div>
                 </div>
               )}
+
+              {/* ⬅️ DIPINDAH: Remarks sekarang di bawah Update Status (bukan di atas
+                  lagi). Remarks ini juga ditampilkan ke staff housekeeping yang
+                  di-assign ke kamar ini lewat halaman Assignments — supaya kalau
+                  supervisor ubah status kamar (mis. Expected Departure jadi
+                  perpanjangan/tidak checkout), staff tahu alasannya, tidak bingung. */}
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">Remarks</p>
+                {canEditRemarks ? (
+                  <>
+                    <Textarea
+                      value={remarksDraft}
+                      onChange={(e) => setRemarksDraft(e.target.value)}
+                      placeholder="Tulis catatan untuk kamar ini..."
+                      rows={3}
+                      className="text-sm"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={handleSaveRemarks}
+                        disabled={
+                          savingRemarks ||
+                          remarksDraft ===
+                            (isNoteFreshToday(selectedRoom.notes_set_at) ? selectedRoom.notes ?? '' : '')
+                        }
+                      >
+                        {savingRemarks && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Save Remarks
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm">
+                    {isNoteFreshToday(selectedRoom.notes_set_at) ? (selectedRoom.notes || '-') : '-'}
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </DialogContent>
