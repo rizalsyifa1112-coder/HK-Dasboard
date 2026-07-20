@@ -30,8 +30,9 @@ import {
   CheckCircle2, PlayCircle, Pencil, X,
 } from 'lucide-react';
 import {
+  PRIORITY_LABELS, PRIORITY_COLORS,
   HOUSEKEEPING_STATUS_LABELS, HOUSEKEEPING_STATUS_COLORS,
-  type Assignment, type Room, type Profile, type Floor, type RoomType,
+  type Assignment, type Room, type Profile, type Priority, type Floor, type RoomType,
 } from '@/lib/types';
 
 const ASSIGNMENT_STATUS_LABELS: Record<Assignment['status'], string> = {
@@ -46,6 +47,14 @@ const ASSIGNMENT_STATUS_COLORS: Record<Assignment['status'], string> = {
   in_progress: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   completed: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
   cancelled: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
+};
+
+const TASK_TYPE_LABELS: Record<Assignment['task_type'], string> = {
+  cleaning: 'Cleaning',
+  turndown: 'Turndown',
+  deep_clean: 'Deep Clean',
+  checkout: 'Checkout',
+  vacant: 'Vacant',
 };
 
 // ⬅️ BARU: helper untuk hitung batas "hari ini" berdasarkan zona waktu WIB (UTC+7),
@@ -66,6 +75,16 @@ function getTodayRangeWIB() {
   const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
   return { todayStart, todayEnd };
+}
+
+// ⬅️ BARU: remarks kamar (rooms.notes) cuma ditampilkan kalau ditulis hari ini
+// (WIB) — kalau sudah lewat hari, dianggap kadaluarsa otomatis meski data
+// mentahnya masih ada di database sampai ditimpa catatan baru
+function isNoteFreshToday(notesSetAt: string | null | undefined): boolean {
+  if (!notesSetAt) return false;
+  const { todayStart, todayEnd } = getTodayRangeWIB();
+  const t = new Date(notesSetAt).getTime();
+  return t >= todayStart.getTime() && t < todayEnd.getTime();
 }
 
 type RoomWithMeta = Room & {
@@ -144,38 +163,6 @@ export default function AssignmentsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  // ⬅️ BARU: dengarkan perubahan status kamar secara realtime, supaya panel
-  // staff & supervisor otomatis update begitu status kamar berubah di halaman
-  // Room Status (tanpa perlu klik Refresh manual).
-  useEffect(() => {
-    const channel = supabase
-      .channel('room-status-sync-assignments')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'rooms' },
-        (payload) => {
-          const updatedRoom = payload.new as Room;
-
-          setRooms((prev) =>
-            prev.map((r) => (r.id === updatedRoom.id ? { ...r, ...updatedRoom } : r))
-          );
-
-          setAssignments((prev) =>
-            prev.map((a) =>
-              a.room_id === updatedRoom.id
-                ? { ...a, room: a.room ? { ...a.room, ...updatedRoom } : a.room }
-                : a
-            )
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   const filtered = assignments.filter((a) => {
     // ⬅️ Opsi A: assignment cancelled tidak pernah ditampilkan sama sekali,
@@ -264,21 +251,6 @@ export default function AssignmentsPage() {
       });
       const { error } = await supabase.from('assignments').insert(inserts);
       if (error) throw error;
-
-      // ⬅️ BARU: kirim notifikasi ke masing-masing staff yang baru di-assign
-      const notifRows = entries.map(([roomId, staffId]) => {
-        const room = rooms.find((r) => r.id === roomId);
-        return {
-          user_id: staffId,
-          title: 'Kamar baru ditugaskan',
-          message: `Kamar ${room?.number ?? '-'} telah ditugaskan kepada Anda`,
-          type: 'assignment',
-          link: '/assignments',
-        };
-      });
-      const { error: notifError } = await supabase.from('notifications').insert(notifRows);
-      if (notifError) console.error('Failed to send notifications:', notifError);
-
       toast({ title: 'Created', description: `${inserts.length} assignment(s) created successfully` });
       setDialogOpen(false);
       setRoomAssignments({});
@@ -470,7 +442,8 @@ export default function AssignmentsPage() {
               <TableRow>
                 <TableHead>Room</TableHead>
                 <TableHead>Staff</TableHead>
-                <TableHead>Room Status</TableHead>
+                <TableHead>Task Type</TableHead>
+                <TableHead>Priority</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Assigned</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -479,19 +452,31 @@ export default function AssignmentsPage() {
             <TableBody>
               {filtered.map((a) => (
                 <TableRow key={a.id}>
-                  <TableCell className="font-medium">{a.room?.number ?? '-'}</TableCell>
+                  <TableCell className="font-medium">
+                    <div>{a.room?.number ?? '-'}</div>
+                    {/* ⬅️ BARU: remarks dari supervisor (kolom rooms.notes) ditampilkan
+                        di sini supaya staff langsung lihat konteks penting — misalnya
+                        kamar yang paginya Expected Departure ternyata siangnya
+                        diperpanjang, jadi tidak bingung kenapa status berubah */}
+                    {a.room?.notes && isNoteFreshToday(a.room?.notes_set_at) && (
+                      <p className="text-[11px] font-normal text-amber-600 dark:text-amber-400 mt-0.5 max-w-[160px] whitespace-normal">
+                        📝 {a.room.notes}
+                      </p>
+                    )}
+                  </TableCell>
                   <TableCell>{a.staff?.full_name ?? 'Unassigned'}</TableCell>
                   <TableCell>
-                    {a.room ? (
-                      <Badge
-                        variant="outline"
-                        className={cn('text-xs', HOUSEKEEPING_STATUS_COLORS[a.room.housekeeping_status])}
-                      >
-                        {HOUSEKEEPING_STATUS_LABELS[a.room.housekeeping_status]}
-                      </Badge>
-                    ) : (
-                      '-'
-                    )}
+                    <Badge variant="outline" className="text-xs">
+                      {TASK_TYPE_LABELS[a.task_type]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={cn('text-xs', PRIORITY_COLORS[a.priority])}
+                    >
+                      {PRIORITY_LABELS[a.priority]}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Badge
