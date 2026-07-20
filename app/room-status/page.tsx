@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -16,7 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import {
-  Search, RefreshCw, Download, BedDouble, Filter,
+  Search, RefreshCw, Download, BedDouble, Filter, Loader2,
 } from 'lucide-react';
 import {
   HOUSEKEEPING_STATUS_LABELS, HOUSEKEEPING_STATUS_COLORS,
@@ -36,7 +37,13 @@ export default function RoomStatusPage() {
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [updating, setUpdating] = useState(false);
 
+  // ⬅️ BARU: state untuk field Remarks manual di dialog detail kamar
+  const [remarksDraft, setRemarksDraft] = useState('');
+  const [savingRemarks, setSavingRemarks] = useState(false);
+
   const canEdit = profile?.role === 'admin' || profile?.role === 'supervisor' || profile?.role === 'housekeeping';
+  // ⬅️ BARU: khusus edit remarks — admin & supervisor saja (asumsi: bukan staff housekeeping)
+  const canEditRemarks = profile?.role === 'admin' || profile?.role === 'supervisor';
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -61,6 +68,12 @@ export default function RoomStatusPage() {
     fetchData();
   }, [fetchData]);
 
+  // ⬅️ BARU: setiap kali dialog dibuka untuk kamar berbeda, reset draft remarks
+  // ke isi notes kamar tersebut yang tersimpan di database
+  useEffect(() => {
+    setRemarksDraft(selectedRoom?.notes ?? '');
+  }, [selectedRoom?.id]);
+
   const filteredRooms = rooms.filter((r) => {
     const matchSearch = r.number.toLowerCase().includes(search.toLowerCase());
     const matchFloor = floorFilter === 'all' || r.floor_id === floorFilter;
@@ -75,7 +88,6 @@ export default function RoomStatusPage() {
     }))
     .filter((g) => g.rooms.length > 0);
 
-  // ===== UPDATED: handleStatusChange now includes vacant_clean_unchecked =====
   const handleStatusChange = async (room: Room, newStatus: HousekeepingStatus) => {
     setUpdating(true);
     try {
@@ -110,7 +122,27 @@ export default function RoomStatusPage() {
     }
   };
 
-  // ===== UPDATED: statusCounts now includes vacant_clean_unchecked =====
+  // ⬅️ BARU: simpan remarks manual ke kolom notes
+  const handleSaveRemarks = async () => {
+    if (!selectedRoom) return;
+    setSavingRemarks(true);
+    try {
+      const { error } = await supabase
+        .from('rooms')
+        .update({ notes: remarksDraft.trim() || null })
+        .eq('id', selectedRoom.id);
+      if (error) throw error;
+
+      await fetchData();
+      // update juga state selectedRoom yang lagi terbuka, supaya UI langsung sinkron
+      setSelectedRoom((prev) => (prev ? { ...prev, notes: remarksDraft.trim() || null } : prev));
+    } catch (err) {
+      console.error('Error saving remarks:', err);
+    } finally {
+      setSavingRemarks(false);
+    }
+  };
+
   const statusCounts: Record<HousekeepingStatus, number> = {
     vacant_dirty: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_dirty').length,
     vacant_clean_unchecked: filteredRooms.filter((r) => r.housekeeping_status === 'vacant_clean_unchecked').length,
@@ -294,12 +326,35 @@ export default function RoomStatusPage() {
                       : 'N/A'}
                   </p>
                 </div>
-                {selectedRoom.notes && (
-                  <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground">Notes</p>
-                    <p className="text-sm">{selectedRoom.notes}</p>
-                  </div>
-                )}
+
+                {/* ⬅️ BARU: field Remarks — admin/supervisor bisa ketik manual & simpan,
+                    role lain (kalau canEdit tapi bukan admin/supervisor) cuma bisa lihat */}
+                <div className="col-span-2 space-y-1.5">
+                  <p className="text-xs text-muted-foreground">Remarks</p>
+                  {canEditRemarks ? (
+                    <>
+                      <Textarea
+                        value={remarksDraft}
+                        onChange={(e) => setRemarksDraft(e.target.value)}
+                        placeholder="Tulis catatan untuk kamar ini..."
+                        rows={3}
+                        className="text-sm"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={handleSaveRemarks}
+                          disabled={savingRemarks || remarksDraft === (selectedRoom.notes ?? '')}
+                        >
+                          {savingRemarks && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Save Remarks
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm">{selectedRoom.notes || '-'}</p>
+                  )}
+                </div>
               </div>
 
               {canEdit && (
