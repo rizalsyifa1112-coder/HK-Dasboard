@@ -91,6 +91,7 @@ export interface Room {
   occupancy_status: OccupancyStatus;
   priority: Priority;
   notes: string | null;
+  notes_set_at: string | null;
   last_cleaned_at: string | null;
   created_at: string;
   updated_at: string;
