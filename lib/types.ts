@@ -202,6 +202,7 @@ export interface StoreRequest {
   priority: Priority;
   notes: string | null;
   synced_at: string | null;
+  request_date: string;
   created_at: string;
   updated_at: string;
   requester?: Profile | null;
