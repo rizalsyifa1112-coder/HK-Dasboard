@@ -22,7 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Search, RefreshCw, Download, Plus, Filter, Shirt, Loader2, CloudUpload,
+  Search, RefreshCw, Plus, Filter, Shirt, Loader2, Pencil, X,
 } from 'lucide-react';
 import { type Room } from '@/lib/types';
 
@@ -99,14 +99,15 @@ export default function LaundryGuestPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [syncingAll, setSyncingAll] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     room_id: '',
     notes: '',
+    status: 'received' as GuestLaundryStatus,
   });
   const [qtyMap, setQtyMap] = useState<Record<string, number>>({});
 
@@ -172,133 +173,194 @@ export default function LaundryGuestPage() {
     (o.items ?? []).reduce((sum, oi) => sum + ((oi.item?.price ?? 0) * (oi.qty || 0)), 0);
 
   const resetForm = () => {
-    setForm({ room_id: '', notes: '' });
+    setForm({ room_id: '', notes: '', status: 'received' });
     setQtyMap({});
+    setEditingOrderId(null);
   };
 
-  const handleCreate = async () => {
+  const openCreateDialog = () => {
+    resetForm();
+    setDialogMode('create');
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (order: GuestLaundryOrder) => {
+    setDialogMode('edit');
+    setEditingOrderId(order.id);
+    setForm({
+      room_id: order.room_id ?? '',
+      notes: order.notes ?? '',
+      status: order.status,
+    });
+    const nextQtyMap: Record<string, number> = {};
+    (order.items ?? []).forEach((oi) => {
+      nextQtyMap[oi.item_id] = oi.qty;
+    });
+    setQtyMap(nextQtyMap);
+    setDialogOpen(true);
+  };
+
+  // ⬅️ Sync otomatis ke Google Sheets, dipanggil diam-diam setelah create/edit berhasil
+  const syncOrder = async (orderId: string) => {
+    try {
+      const res = await fetch('/api/sync-laundry-guest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+      return data;
+    } catch (err) {
+      console.error('Auto-sync error:', err);
+      toast({
+        title: 'Sync ke spreadsheet gagal',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+      return null;
+    }
+  };
+
+  const handleSubmit = async () => {
     setSaving(true);
     try {
-      const { data: newOrder, error } = await supabase
-        .from('laundry_guest_orders')
-        .insert({
-          order_number: `GL${Date.now().toString().slice(-8)}`,
-          room_id: form.room_id || null,
-          guest_name: null,
-          priority: 'normal' as GuestLaundryPriority,
-          notes: form.notes || null,
-          status: 'received',
-          send_date: new Date().toISOString().slice(0, 10),
-          order_taker_id: profile?.id ?? null,
-        })
-        .select()
-        .single();
-      if (error) throw error;
+      if (dialogMode === 'create') {
+        const { data: newOrder, error } = await supabase
+          .from('laundry_guest_orders')
+          .insert({
+            order_number: `GL${Date.now().toString().slice(-8)}`,
+            room_id: form.room_id || null,
+            guest_name: null,
+            priority: 'normal' as GuestLaundryPriority,
+            notes: form.notes || null,
+            status: 'received',
+            send_date: new Date().toISOString().slice(0, 10),
+            order_taker_id: profile?.id ?? null,
+          })
+          .select()
+          .single();
+        if (error) throw error;
 
-      const itemRows = Object.entries(qtyMap)
-        .filter(([, qty]) => qty > 0)
-        .map(([item_id, qty]) => ({ order_id: newOrder.id, item_id, qty }));
+        const itemRows = Object.entries(qtyMap)
+          .filter(([, qty]) => qty > 0)
+          .map(([item_id, qty]) => ({ order_id: newOrder.id, item_id, qty }));
 
-      if (itemRows.length > 0) {
-        const { error: itemsError } = await supabase.from('laundry_guest_order_items').insert(itemRows);
-        if (itemsError) throw itemsError;
+        if (itemRows.length > 0) {
+          const { error: itemsError } = await supabase.from('laundry_guest_order_items').insert(itemRows);
+          if (itemsError) throw itemsError;
+        }
+
+        toast({ title: 'Created', description: 'Guest laundry order created, syncing to spreadsheet...' });
+        setDialogOpen(false);
+        resetForm();
+        await syncOrder(newOrder.id);
+        fetchData();
+      } else if (dialogMode === 'edit' && editingOrderId) {
+        const { error: updateError } = await supabase
+          .from('laundry_guest_orders')
+          .update({
+            room_id: form.room_id || null,
+            notes: form.notes || null,
+            status: form.status,
+          })
+          .eq('id', editingOrderId);
+        if (updateError) throw updateError;
+
+        // Ganti seluruh item order dengan qty terbaru dari form
+        const { error: deleteItemsError } = await supabase
+          .from('laundry_guest_order_items')
+          .delete()
+          .eq('order_id', editingOrderId);
+        if (deleteItemsError) throw deleteItemsError;
+
+        const itemRows = Object.entries(qtyMap)
+          .filter(([, qty]) => qty > 0)
+          .map(([item_id, qty]) => ({ order_id: editingOrderId, item_id, qty }));
+
+        if (itemRows.length > 0) {
+          const { error: itemsError } = await supabase.from('laundry_guest_order_items').insert(itemRows);
+          if (itemsError) throw itemsError;
+        }
+
+        toast({ title: 'Updated', description: 'Order updated, re-syncing to spreadsheet...' });
+        setDialogOpen(false);
+        resetForm();
+        await syncOrder(editingOrderId);
+        fetchData();
       }
-
-      toast({ title: 'Created', description: 'Guest laundry order created successfully' });
-      setDialogOpen(false);
-      resetForm();
-      fetchData();
     } catch (err) {
-      console.error('Create error:', err);
+      console.error('Submit error:', err);
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleStatusChange = async (order: GuestLaundryOrder, newStatus: GuestLaundryStatus) => {
-    setUpdatingId(order.id);
+  const handleDelete = async (order: GuestLaundryOrder) => {
+    const confirmed = window.confirm(
+      `Hapus order ${order.order_number ?? ''}? Tindakan ini tidak bisa dibatalkan.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(order.id);
     try {
-      const { error } = await supabase.from('laundry_guest_orders').update({ status: newStatus }).eq('id', order.id);
-      if (error) throw error;
-      toast({ title: 'Updated', description: 'Order status updated' });
+      const { error: deleteItemsError } = await supabase
+        .from('laundry_guest_order_items')
+        .delete()
+        .eq('order_id', order.id);
+      if (deleteItemsError) throw deleteItemsError;
+
+      const { error: deleteOrderError } = await supabase
+        .from('laundry_guest_orders')
+        .delete()
+        .eq('id', order.id);
+      if (deleteOrderError) throw deleteOrderError;
+
+      toast({ title: 'Deleted', description: `Order ${order.order_number ?? ''} dihapus` });
       fetchData();
     } catch (err) {
-      console.error('Update error:', err);
+      console.error('Delete error:', err);
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
-      setUpdatingId(null);
+      setDeletingId(null);
     }
   };
 
-  const syncOrder = async (orderId: string) => {
-    const res = await fetch('/api/sync-laundry-guest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Sync failed');
-    return data;
-  };
-
-  const handleSyncOne = async (order: GuestLaundryOrder) => {
-    setSyncingId(order.id);
-    try {
-      await syncOrder(order.id);
-      toast({ title: 'Synced', description: `Order ${order.order_number ?? ''} synced to spreadsheet` });
-      fetchData();
-    } catch (err) {
-      console.error('Sync error:', err);
-      toast({ title: 'Sync failed', description: (err as Error).message, variant: 'destructive' });
-    } finally {
-      setSyncingId(null);
-    }
-  };
-
-  const handleSyncAll = async () => {
-    const pending = filtered.filter((o) => !o.synced_at);
-    if (pending.length === 0) {
-      toast({ title: 'Nothing to sync', description: 'All visible orders are already synced' });
-      return;
-    }
-    setSyncingAll(true);
-    let ok = 0;
-    let failed = 0;
-    for (const order of pending) {
-      try {
-        await syncOrder(order.id);
-        ok += 1;
-      } catch (err) {
-        console.error('Sync error for', order.id, err);
-        failed += 1;
-      }
-    }
-    setSyncingAll(false);
-    toast({
-      title: 'Sync finished',
-      description: `${ok} order synced${failed > 0 ? `, ${failed} failed` : ''}`,
-      variant: failed > 0 ? 'destructive' : undefined,
-    });
-    fetchData();
-  };
+  const renderItemGrid = (categoryItems: GuestLaundryItem[]) => (
+    <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+      {categoryItems.map((it) => (
+        <div key={it.id} className="flex items-center justify-between gap-2">
+          <div className="flex flex-col min-w-0">
+            <span className="text-xs truncate" title={it.name}>{it.name}</span>
+            <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
+          </div>
+          <Input
+            type="number"
+            min={0}
+            className="w-16 h-7 text-xs shrink-0"
+            value={qtyMap[it.id] ?? ''}
+            onChange={(e) =>
+              setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
+            }
+          />
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       <PageHeader
         title="Laundry Guest"
-        description="Manage guest laundry orders with itemized baku items and spreadsheet sync"
+        description="Manage guest laundry orders with itemized baku items and automatic spreadsheet sync"
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={fetchData}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={handleSyncAll} disabled={syncingAll}>
-              {syncingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Sync Spreadsheet
-            </Button>
             {canEdit && (
-              <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Button size="sm" onClick={openCreateDialog}>
                 <Plus className="mr-2 h-4 w-4" /> New Order
               </Button>
             )}
@@ -380,32 +442,28 @@ export default function LaundryGuestPage() {
                   </TableCell>
                   {canEdit && (
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-1 flex-wrap">
+                      <div className="flex justify-end gap-1">
                         <Button
                           variant="outline"
-                          size="sm"
-                          disabled={syncingId === o.id}
-                          onClick={() => handleSyncOne(o)}
-                          className="text-xs h-7"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openEditDialog(o)}
+                          title="Edit order"
                         >
-                          {syncingId === o.id
-                            ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                            : <CloudUpload className="mr-1 h-3 w-3" />}
-                          Sync
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        {(Object.keys(STATUS_LABELS) as GuestLaundryStatus[]).map((s) => (
-                          <Button
-                            key={s}
-                            variant={o.status === s ? 'default' : 'outline'}
-                            size="sm"
-                            disabled={updatingId === o.id}
-                            onClick={() => handleStatusChange(o, s)}
-                            className={cn('text-xs h-7', o.status !== s && STATUS_COLORS[s])}
-                          >
-                            {updatingId === o.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                            {STATUS_LABELS[s]}
-                          </Button>
-                        ))}
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          disabled={deletingId === o.id}
+                          onClick={() => handleDelete(o)}
+                          title="Delete order"
+                        >
+                          {deletingId === o.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <X className="h-3.5 w-3.5" />}
+                        </Button>
                       </div>
                     </TableCell>
                   )}
@@ -416,12 +474,16 @@ export default function LaundryGuestPage() {
         </div>
       )}
 
-      {/* Create Dialog */}
+      {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>New Guest Laundry Order</DialogTitle>
-            <DialogDescription>Create a new guest laundry order with itemized items</DialogDescription>
+            <DialogTitle>{dialogMode === 'create' ? 'New Guest Laundry Order' : 'Edit Guest Laundry Order'}</DialogTitle>
+            <DialogDescription>
+              {dialogMode === 'create'
+                ? 'Create a new guest laundry order with itemized items'
+                : 'Update this order — resubmitting will re-sync corrected data to the spreadsheet'}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
@@ -438,29 +500,30 @@ export default function LaundryGuestPage() {
               </Select>
             </div>
 
+            {dialogMode === 'edit' && (
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => setForm({ ...form, status: v as GuestLaundryStatus })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(STATUS_LABELS) as GuestLaundryStatus[]).map((s) => (
+                      <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {/* Item baku PRIA */}
             {itemsByCategory.pria.length > 0 && (
               <div className="space-y-1.5">
                 <Label>Pria / Gentlemen</Label>
-                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
-                  {itemsByCategory.pria.map((it) => (
-                    <div key={it.id} className="flex items-center justify-between gap-2">
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs truncate" title={it.name}>{it.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
-                      </div>
-                      <Input
-                        type="number"
-                        min={0}
-                        className="w-16 h-7 text-xs shrink-0"
-                        value={qtyMap[it.id] ?? ''}
-                        onChange={(e) =>
-                          setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
+                {renderItemGrid(itemsByCategory.pria)}
               </div>
             )}
 
@@ -468,25 +531,7 @@ export default function LaundryGuestPage() {
             {itemsByCategory.wanita.length > 0 && (
               <div className="space-y-1.5">
                 <Label>Wanita / Ladies</Label>
-                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
-                  {itemsByCategory.wanita.map((it) => (
-                    <div key={it.id} className="flex items-center justify-between gap-2">
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs truncate" title={it.name}>{it.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
-                      </div>
-                      <Input
-                        type="number"
-                        min={0}
-                        className="w-16 h-7 text-xs shrink-0"
-                        value={qtyMap[it.id] ?? ''}
-                        onChange={(e) =>
-                          setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
+                {renderItemGrid(itemsByCategory.wanita)}
               </div>
             )}
 
@@ -494,25 +539,7 @@ export default function LaundryGuestPage() {
             {itemsByCategory.paket.length > 0 && (
               <div className="space-y-1.5">
                 <Label>Paket</Label>
-                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
-                  {itemsByCategory.paket.map((it) => (
-                    <div key={it.id} className="flex items-center justify-between gap-2">
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs truncate" title={it.name}>{it.name}</span>
-                        <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
-                      </div>
-                      <Input
-                        type="number"
-                        min={0}
-                        className="w-16 h-7 text-xs shrink-0"
-                        value={qtyMap[it.id] ?? ''}
-                        onChange={(e) =>
-                          setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
+                {renderItemGrid(itemsByCategory.paket)}
               </div>
             )}
 
@@ -534,9 +561,9 @@ export default function LaundryGuestPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving}>
+            <Button onClick={handleSubmit} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create
+              Submit
             </Button>
           </DialogFooter>
         </DialogContent>
