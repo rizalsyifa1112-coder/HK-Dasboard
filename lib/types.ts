@@ -192,16 +192,32 @@ export interface StoreRequest {
   id: string;
   request_number: string;
   requested_by: string | null;
+  item_id: string | null;
   item_name: string;
   category: string;
   quantity: number;
   unit: string;
+  price: number | null;
   status: 'pending' | 'approved' | 'fulfilled' | 'rejected';
   priority: Priority;
   notes: string | null;
+  synced_at: string | null;
   created_at: string;
   updated_at: string;
   requester?: Profile | null;
+  item?: StoreRequestItem | null;
+}
+
+export interface StoreRequestItem {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  price: number;
+  sheet_row: number | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Loan {
