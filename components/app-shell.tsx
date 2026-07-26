@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'assignments', label: 'Assignments', href: '/assignments', icon: ClipboardList, group: 'Operations' },
   { key: 'inspection', label: 'Inspection', href: '/inspection', icon: CheckSquare, group: 'Operations' },
   { key: 'laundry', label: 'Guest Laundry', href: '/laundry', icon: Shirt, group: 'Operations' },
+  { key: 'laundry-guest', label: 'Laundry Guest', href: '/laundry-guest', icon: Shirt, group: 'Operations' },
   { key: 'general-laundry', label: 'Linen Laundry', href: '/general-laundry', icon: Shirt, group: 'Operations' },
   { key: 'linen-tracking', label: 'BT/BM Tracking', href: '/linen-tracking', icon: Layers, group: 'Operations' },
   { key: 'linen-general', label: 'Linen General', href: '/linen-general', icon: Layers, group: 'Operations' },
