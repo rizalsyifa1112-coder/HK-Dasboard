@@ -34,7 +34,7 @@ type GuestLaundryPriority = 'express' | 'normal';
 interface GuestLaundryItem {
   id: string;
   name: string;
-  category: 'pria' | 'wanita';
+  category: 'pria' | 'wanita' | 'paket';
   price: number;
   sheet_row: number;
   sort_order: number;
@@ -82,15 +82,12 @@ const STATUS_COLORS: Record<GuestLaundryStatus, string> = {
   cancelled: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
 };
 
-const PRIORITY_LABELS: Record<GuestLaundryPriority, string> = {
-  express: 'Express',
-  normal: 'Normal',
-};
-
-const PRIORITY_COLORS: Record<GuestLaundryPriority, string> = {
-  express: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
-  normal: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
-};
+const formatRupiah = (n: number) =>
+  new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+  }).format(n || 0);
 
 export default function LaundryGuestPage() {
   const { profile } = useAuth();
@@ -109,8 +106,6 @@ export default function LaundryGuestPage() {
 
   const [form, setForm] = useState({
     room_id: '',
-    guest_name: '',
-    priority: 'normal' as GuestLaundryPriority,
     notes: '',
   });
   const [qtyMap, setQtyMap] = useState<Record<string, number>>({});
@@ -146,6 +141,7 @@ export default function LaundryGuestPage() {
   const itemsByCategory = useMemo(() => ({
     pria: items.filter((i) => i.category === 'pria'),
     wanita: items.filter((i) => i.category === 'wanita'),
+    paket: items.filter((i) => i.category === 'paket'),
   }), [items]);
 
   const totalQty = useMemo(
@@ -153,10 +149,17 @@ export default function LaundryGuestPage() {
     [qtyMap]
   );
 
+  const totalPrice = useMemo(
+    () => Object.entries(qtyMap).reduce((sum, [itemId, qty]) => {
+      const item = items.find((i) => i.id === itemId);
+      return sum + (item ? item.price * (qty || 0) : 0);
+    }, 0),
+    [qtyMap, items]
+  );
+
   const filtered = orders.filter((o) => {
     const matchSearch =
       (o.order_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.guest_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (o.room?.number ?? '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'all' || o.status === statusFilter;
     return matchSearch && matchStatus;
@@ -165,8 +168,11 @@ export default function LaundryGuestPage() {
   const orderTotalItems = (o: GuestLaundryOrder) =>
     (o.items ?? []).reduce((sum, oi) => sum + (oi.qty || 0), 0);
 
+  const orderTotalPrice = (o: GuestLaundryOrder) =>
+    (o.items ?? []).reduce((sum, oi) => sum + ((oi.item?.price ?? 0) * (oi.qty || 0)), 0);
+
   const resetForm = () => {
-    setForm({ room_id: '', guest_name: '', priority: 'normal', notes: '' });
+    setForm({ room_id: '', notes: '' });
     setQtyMap({});
   };
 
@@ -178,8 +184,8 @@ export default function LaundryGuestPage() {
         .insert({
           order_number: `GL${Date.now().toString().slice(-8)}`,
           room_id: form.room_id || null,
-          guest_name: form.guest_name || null,
-          priority: form.priority,
+          guest_name: null,
+          priority: 'normal' as GuestLaundryPriority,
           notes: form.notes || null,
           status: 'received',
           send_date: new Date().toISOString().slice(0, 10),
@@ -305,7 +311,7 @@ export default function LaundryGuestPage() {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search order, room, or guest..."
+            placeholder="Search order or room..."
             className="pl-8"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -346,9 +352,8 @@ export default function LaundryGuestPage() {
               <TableRow>
                 <TableHead>Order #</TableHead>
                 <TableHead>Room</TableHead>
-                <TableHead>Guest</TableHead>
-                <TableHead>Priority</TableHead>
                 <TableHead>Items</TableHead>
+                <TableHead>Total Price</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Synced</TableHead>
                 <TableHead>Date</TableHead>
@@ -360,13 +365,8 @@ export default function LaundryGuestPage() {
                 <TableRow key={o.id}>
                   <TableCell className="font-medium">{o.order_number ?? '-'}</TableCell>
                   <TableCell>{o.room?.number ?? '-'}</TableCell>
-                  <TableCell>{o.guest_name ?? '-'}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={cn('text-xs', PRIORITY_COLORS[o.priority])}>
-                      {PRIORITY_LABELS[o.priority]}
-                    </Badge>
-                  </TableCell>
                   <TableCell>{orderTotalItems(o)}</TableCell>
+                  <TableCell className="font-medium">{formatRupiah(orderTotalPrice(o))}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={cn('text-xs', STATUS_COLORS[o.status])}>
                       {STATUS_LABELS[o.status]}
@@ -437,75 +437,89 @@ export default function LaundryGuestPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="guest_name">Guest Name</Label>
-              <Input
-                id="guest_name"
-                value={form.guest_name}
-                onChange={(e) => setForm({ ...form, guest_name: e.target.value })}
-                placeholder="John Doe"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Priority</Label>
-              <Select
-                value={form.priority}
-                onValueChange={(v) => setForm({ ...form, priority: v as GuestLaundryPriority })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(PRIORITY_LABELS) as GuestLaundryPriority[]).map((p) => (
-                    <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
 
             {/* Item baku PRIA */}
-            <div className="space-y-1.5">
-              <Label>Pria / Gentlemen</Label>
-              <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
-                {itemsByCategory.pria.map((it) => (
-                  <div key={it.id} className="flex items-center justify-between gap-2">
-                    <span className="text-xs truncate" title={it.name}>{it.name}</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      className="w-16 h-7 text-xs"
-                      value={qtyMap[it.id] ?? ''}
-                      onChange={(e) =>
-                        setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
-                      }
-                    />
-                  </div>
-                ))}
+            {itemsByCategory.pria.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Pria / Gentlemen</Label>
+                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+                  {itemsByCategory.pria.map((it) => (
+                    <div key={it.id} className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs truncate" title={it.name}>{it.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
+                      </div>
+                      <Input
+                        type="number"
+                        min={0}
+                        className="w-16 h-7 text-xs shrink-0"
+                        value={qtyMap[it.id] ?? ''}
+                        onChange={(e) =>
+                          setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Item baku WANITA */}
-            <div className="space-y-1.5">
-              <Label>Wanita / Ladies</Label>
-              <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
-                {itemsByCategory.wanita.map((it) => (
-                  <div key={it.id} className="flex items-center justify-between gap-2">
-                    <span className="text-xs truncate" title={it.name}>{it.name}</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      className="w-16 h-7 text-xs"
-                      value={qtyMap[it.id] ?? ''}
-                      onChange={(e) =>
-                        setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
-                      }
-                    />
-                  </div>
-                ))}
+            {itemsByCategory.wanita.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Wanita / Ladies</Label>
+                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+                  {itemsByCategory.wanita.map((it) => (
+                    <div key={it.id} className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs truncate" title={it.name}>{it.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
+                      </div>
+                      <Input
+                        type="number"
+                        min={0}
+                        className="w-16 h-7 text-xs shrink-0"
+                        value={qtyMap[it.id] ?? ''}
+                        onChange={(e) =>
+                          setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
-            <p className="text-xs text-muted-foreground">Total items: {totalQty}</p>
+            {/* Item baku PAKET */}
+            {itemsByCategory.paket.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Paket</Label>
+                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+                  {itemsByCategory.paket.map((it) => (
+                    <div key={it.id} className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs truncate" title={it.name}>{it.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{formatRupiah(it.price)}</span>
+                      </div>
+                      <Input
+                        type="number"
+                        min={0}
+                        className="w-16 h-7 text-xs shrink-0"
+                        value={qtyMap[it.id] ?? ''}
+                        onChange={(e) =>
+                          setQtyMap({ ...qtyMap, [it.id]: parseInt(e.target.value || '0', 10) })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+              <span className="text-xs text-muted-foreground">Total items: {totalQty}</span>
+              <span className="text-sm font-semibold">{formatRupiah(totalPrice)}</span>
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
