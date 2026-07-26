@@ -195,6 +195,7 @@ export default function StoreRequestPage() {
         const { data, error } = await supabase
           .from('store_requests')
           .insert({
+            request_number: `SR-${Date.now()}`,
             item_id: item.id,
             item_name: item.name,
             category: item.category,
@@ -318,6 +319,7 @@ export default function StoreRequestPage() {
             const { data, error } = await supabase
               .from('store_requests')
               .insert({
+                request_number: `SR-${Date.now()}-${item.id.slice(0, 4)}`,
                 item_id: item.id,
                 item_name: item.name,
                 category: item.category,
