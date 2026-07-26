@@ -25,20 +25,20 @@ export type ModuleKey =
 
 const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
   admin: [
-    'dashboard', 'room-status', 'assignments', 'inspection', 'laundry','laundry-guest',
+    'dashboard', 'room-status', 'assignments', 'inspection', 'laundry', 'laundry-guest',
     'general-laundry', 'linen-tracking', 'linen-general', 'store-request',
     'loan-management', 'reports', 'activity-logs', 'rooms', 'floors',
     'room-types', 'sections', 'amenities', 'users', 'ai-vision',
     'spreadsheet-templates',
   ],
   supervisor: [
-    'dashboard', 'room-status', 'assignments', 'inspection', 'laundry','laundry-guest',
+    'dashboard', 'room-status', 'assignments', 'inspection', 'laundry', 'laundry-guest',
     'general-laundry', 'linen-tracking', 'linen-general', 'store-request',
     'loan-management', 'reports', 'activity-logs', 'rooms', 'floors',
     'room-types', 'sections', 'amenities', 'ai-vision', 'spreadsheet-templates',
   ],
   order_taker: [
-    'dashboard', 'laundry','laundry-guest', 'general-laundry', 'linen-general',
+    'dashboard', 'laundry', 'laundry-guest', 'general-laundry', 'linen-general',
     'loan-management', 'linen-tracking',
   ],
   housekeeping: [
