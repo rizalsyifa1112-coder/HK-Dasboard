@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     // 7. Union semua item yang pernah/sedang terlibat, untuk hitung delta
     //    (delta bisa negatif kalau item dihapus/qty dikurangi saat edit)
-    const allItemIds = new Set<string>([...prevMap.keys(), ...currentMap.keys()]);
+    const allItemIds = new Set<string>([...Array.from(prevMap.keys()), ...Array.from(currentMap.keys())]);
 
     // 8. Cari sheet_row tiap item. Ambil dari order.items dulu; kalau item sudah
     //    tidak ada di order (dihapus saat edit) tapi masih di prevMap, query manual.
