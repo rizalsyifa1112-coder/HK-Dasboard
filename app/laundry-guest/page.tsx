@@ -108,6 +108,7 @@ export default function LaundryGuestPage() {
     room_id: '',
     notes: '',
     status: 'received' as GuestLaundryStatus,
+    send_date: new Date().toISOString().slice(0, 10),
   });
   const [qtyMap, setQtyMap] = useState<Record<string, number>>({});
 
