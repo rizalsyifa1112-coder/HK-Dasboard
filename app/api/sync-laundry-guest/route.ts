@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     for (const oi of order.items ?? []) {
       if (oi.item?.sheet_row != null) itemRowMap.set(oi.item_id, oi.item.sheet_row);
     }
-    const missingIds = [...allItemIds].filter((id) => !itemRowMap.has(id));
+    const missingIds = Array.from(allItemIds).filter((id) => !itemRowMap.has(id));
     if (missingIds.length > 0) {
       const { data: missingItems } = await supabaseAdmin
         .from('laundry_guest_items')
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     // 9. Hitung delta per item (qty baru - qty yang sudah pernah disync)
     const skipped: string[] = [];
     const deltas: { itemId: string; cellRef: string; delta: number }[] = [];
-    for (const itemId of allItemIds) {
+    for (const itemId of Array.from(allItemIds)) {
       const prevQty = prevMap.get(itemId) ?? 0;
       const newQty = currentMap.get(itemId) ?? 0;
       const delta = newQty - prevQty;
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       // 11. Simpan snapshot qty yang baru saja disinkronkan, jadi acuan delta
       //     untuk sync berikutnya (misal kalau order ini di-edit lagi nanti).
       await supabaseAdmin.from('laundry_guest_synced_items').delete().eq('order_id', orderId);
-      const upsertRows = [...currentMap.entries()].map(([item_id, qty]) => ({
+      const upsertRows = Array.from(currentMap.entries()).map(([item_id, qty]) => ({
         order_id: orderId,
         item_id,
         qty,
