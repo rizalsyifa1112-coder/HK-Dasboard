@@ -174,7 +174,12 @@ export default function LaundryGuestPage() {
     (o.items ?? []).reduce((sum, oi) => sum + ((oi.item?.price ?? 0) * (oi.qty || 0)), 0);
 
   const resetForm = () => {
-    setForm({ room_id: '', notes: '', status: 'received' });
+    setForm({
+      room_id: '',
+      notes: '',
+      status: 'received',
+      send_date: new Date().toISOString().slice(0, 10),
+    });
     setQtyMap({});
     setEditingOrderId(null);
   };
@@ -192,6 +197,7 @@ export default function LaundryGuestPage() {
       room_id: order.room_id ?? '',
       notes: order.notes ?? '',
       status: order.status,
+      send_date: order.send_date,
     });
     const nextQtyMap: Record<string, number> = {};
     (order.items ?? []).forEach((oi) => {
@@ -236,7 +242,7 @@ export default function LaundryGuestPage() {
             priority: 'normal' as GuestLaundryPriority,
             notes: form.notes || null,
             status: 'received',
-            send_date: new Date().toISOString().slice(0, 10),
+            send_date: form.send_date,
             order_taker_id: profile?.id ?? null,
           })
           .select()
@@ -264,6 +270,7 @@ export default function LaundryGuestPage() {
             room_id: form.room_id || null,
             notes: form.notes || null,
             status: form.status,
+            send_date: form.send_date,
           })
           .eq('id', editingOrderId);
         if (updateError) throw updateError;
@@ -487,6 +494,16 @@ export default function LaundryGuestPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="send_date">Laundry Date</Label>
+              <Input
+                id="send_date"
+                type="date"
+                value={form.send_date}
+                onChange={(e) => setForm({ ...form, send_date: e.target.value })}
+              />
+            </div>
+
             <div className="space-y-1.5">
               <Label>Room</Label>
               <Select value={form.room_id} onValueChange={(v) => setForm({ ...form, room_id: v })}>
