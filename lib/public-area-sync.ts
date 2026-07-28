@@ -26,7 +26,7 @@ export async function syncPublicAreaTasksToSheet(date: string) {
   const supabase = getServiceSupabase();
   const { data: tasks, error } = await supabase
     .from('public_area_tasks')
-    .select('*, staff:profiles(full_name)')
+    .select('*, staff:profiles!staff_id(full_name)')
     .eq('task_date', date)
     .order('kategori', { ascending: true })
     .order('zone', { ascending: true });
