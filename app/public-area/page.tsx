@@ -55,7 +55,7 @@ export default function PublicAreaPage() {
 
       const { data, error } = await supabase
         .from('public_area_tasks')
-        .select('*, staff:profiles(*)')
+        .select('*, staff:profiles!staff_id(*)')
         .eq('task_date', targetDate)
         .order('kategori', { ascending: true })
         .order('zone', { ascending: true });
