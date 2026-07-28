@@ -21,7 +21,8 @@ export type ModuleKey =
   | 'amenities'
   | 'users'
   | 'ai-vision'
-  | 'spreadsheet-templates';
+  | 'spreadsheet-templates'
+  | 'public-area';
 
 const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
   admin: [
@@ -29,13 +30,14 @@ const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
     'general-laundry', 'linen-tracking', 'linen-general', 'store-request',
     'loan-management', 'reports', 'activity-logs', 'rooms', 'floors',
     'room-types', 'sections', 'amenities', 'users', 'ai-vision',
-    'spreadsheet-templates',
+    'spreadsheet-templates', 'public-area',
   ],
   supervisor: [
     'dashboard', 'room-status', 'assignments', 'inspection', 'laundry', 'laundry-guest',
     'general-laundry', 'linen-tracking', 'linen-general', 'store-request',
     'loan-management', 'reports', 'activity-logs', 'rooms', 'floors',
     'room-types', 'sections', 'amenities', 'ai-vision', 'spreadsheet-templates',
+    'public-area',
   ],
   order_taker: [
     'dashboard', 'laundry', 'laundry-guest', 'general-laundry', 'linen-general',
@@ -46,6 +48,9 @@ const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
   ],
   evening_shift: [
     'loan-management',
+  ],
+  public_area: [
+    'public-area',
   ],
 };
 
