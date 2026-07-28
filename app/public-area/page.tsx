@@ -32,6 +32,25 @@ function addDays(dateStr: string, delta: number) {
   return d.toISOString().slice(0, 10);
 }
 
+// Panggil endpoint sync di background, tanpa mengganggu alur utama kalau
+// gagal (mis. koneksi lambat). Dipakai supaya spreadsheet ikut ter-update
+// otomatis tiap kali staff mengubah status task, tanpa perlu klik tombol
+// "Sync Spreadsheet" manual.
+async function syncToSheetSilently(targetDate: string) {
+  try {
+    const res = await fetch('/api/public-area/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: targetDate }),
+    });
+    if (!res.ok) {
+      console.error('Auto-sync spreadsheet gagal:', await res.text());
+    }
+  } catch (err) {
+    console.error('Auto-sync spreadsheet gagal:', err);
+  }
+}
+
 export default function PublicAreaPage() {
   const { profile } = useAuth();
   const role = profile?.role;
@@ -100,6 +119,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to claim task:', err);
     } finally {
@@ -120,6 +140,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to complete task:', err);
     } finally {
@@ -137,6 +158,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to reset task:', err);
     } finally {
@@ -161,6 +183,7 @@ export default function PublicAreaPage() {
       setManualForm({ kategori: '', zone: '', item_pekerjaan: '' });
       setManualOpen(false);
       await loadTasks(date);
+      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to add manual task:', err);
     } finally {
