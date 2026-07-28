@@ -23,7 +23,7 @@ import {
   LayoutDashboard, BedDouble, ClipboardList, CheckSquare, Shirt,
   Layers, PackageOpen, HandCoins, FileBarChart, History,
   DoorOpen, Building2, KeySquare, Grid3x3, Sparkles, Users,
-  Moon, Sun, LogOut, Menu, Bell, Hotel, ScanText, Table2,
+  Moon, Sun, LogOut, Menu, Bell, Hotel, ScanText, Table2, Trees,
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
@@ -45,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'linen-tracking', label: 'BT/BM Tracking', href: '/linen-tracking', icon: Layers, group: 'Operations' },
   { key: 'linen-general', label: 'Linen General', href: '/linen-general', icon: Layers, group: 'Operations' },
   { key: 'store-request', label: 'Store Request', href: '/store-request', icon: PackageOpen, group: 'Operations' },
+  { key: 'public-area', label: 'Public Area', href: '/public-area', icon: Trees, group: 'Operations' },
   { key: 'loan-management', label: 'Loan Management', href: '/loan-management', icon: HandCoins, group: 'Operations' },
   { key: 'ai-vision', label: 'AI Vision OCR', href: '/ai-vision', icon: ScanText, group: 'Operations' },
   { key: 'reports', label: 'Reports', href: '/reports', icon: FileBarChart, group: 'Analytics' },
