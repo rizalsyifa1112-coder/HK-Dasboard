@@ -1,4 +1,10 @@
-export type UserRole = 'admin' | 'supervisor' | 'order_taker' | 'housekeeping' | 'evening_shift';
+export type UserRole =
+  | 'admin'
+  | 'supervisor'
+  | 'order_taker'
+  | 'housekeeping'
+  | 'evening_shift'
+  | 'public_area';
 
 export type HousekeepingStatus =
   | 'vacant_dirty'
@@ -365,6 +371,44 @@ export interface LoanItem {
   updated_at: string;
 }
 
+/* ===== Public Area ===== */
+
+export type PublicAreaFrequency = 'daily' | 'weekly' | '3day';
+export type PublicAreaStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface PublicAreaTaskTemplate {
+  id: string;
+  no_asal: number | null;
+  kategori: string;
+  zone: string;
+  item_pekerjaan: string;
+  frequency: PublicAreaFrequency;
+  pola_slot: number | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublicAreaTask {
+  id: string;
+  template_id: string | null;
+  task_date: string; // YYYY-MM-DD
+  kategori: string;
+  zone: string;
+  item_pekerjaan: string;
+  status: PublicAreaStatus;
+  staff_id: string | null;
+  claimed_at: string | null;
+  completed_at: string | null;
+  notes: string | null;
+  is_manual: boolean;
+  created_by: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+  staff?: Profile | null;
+}
+
 /* ===== Label & warna (dari code lama) ===== */
 
 export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
@@ -414,6 +458,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   order_taker: 'Order Taker',
   housekeeping: 'Housekeeping Staff',
   evening_shift: 'Evening Shift',
+  public_area: 'Public Area Staff',
 };
 
 export const ROLE_COLORS: Record<UserRole, string> = {
@@ -422,4 +467,23 @@ export const ROLE_COLORS: Record<UserRole, string> = {
   order_taker: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
   housekeeping: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
   evening_shift: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+  public_area: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30',
+};
+
+export const PUBLIC_AREA_STATUS_LABELS: Record<PublicAreaStatus, string> = {
+  pending: 'Belum Dikerjakan',
+  in_progress: 'Sedang Dikerjakan',
+  completed: 'Selesai',
+};
+
+export const PUBLIC_AREA_STATUS_COLORS: Record<PublicAreaStatus, string> = {
+  pending: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
+  in_progress: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  completed: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+};
+
+export const PUBLIC_AREA_FREQUENCY_LABELS: Record<PublicAreaFrequency, string> = {
+  daily: 'Harian',
+  weekly: 'Mingguan',
+  '3day': '3 Hari Sekali',
 };
