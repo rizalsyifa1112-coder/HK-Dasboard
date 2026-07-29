@@ -100,3 +100,41 @@ export async function batchWriteCells(
     },
   });
 }
+
+/**
+ * Baca satu range penuh (banyak baris & kolom sekaligus) sebagai array 2D.
+ * Dipakai untuk sync Public Area & Inventory supaya bisa cek baris mana
+ * yang sudah ada sebelum menulis (upsert), bukan cuma baca 1 sel.
+ */
+export async function readRange(
+  spreadsheetId: string,
+  range: string
+): Promise<string[][]> {
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  });
+  return (res.data.values as string[][]) ?? [];
+}
+
+/**
+ * Tambah baris baru ke BAWAH data yang sudah ada di sheet (tidak menimpa
+ * baris lama). Google Sheets API otomatis cari baris kosong pertama
+ * setelah data terakhir di range yang diberikan.
+ */
+export async function appendRows(
+  spreadsheetId: string,
+  range: string,
+  values: (string | number)[][]
+) {
+  if (values.length === 0) return;
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values },
+  });
+}
