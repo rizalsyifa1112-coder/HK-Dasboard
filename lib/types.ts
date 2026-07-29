@@ -375,6 +375,7 @@ export interface LoanItem {
 
 export type PublicAreaFrequency = 'daily' | 'weekly' | '3day';
 export type PublicAreaStatus = 'pending' | 'in_progress' | 'completed';
+export type PublicAreaShift = 'morning' | 'evening' | 'night';
 
 export interface PublicAreaTaskTemplate {
   id: string;
@@ -397,6 +398,7 @@ export interface PublicAreaTask {
   zone: string;
   item_pekerjaan: string;
   status: PublicAreaStatus;
+  shift: PublicAreaShift | null;
   staff_id: string | null;
   claimed_at: string | null;
   completed_at: string | null;
@@ -486,4 +488,10 @@ export const PUBLIC_AREA_FREQUENCY_LABELS: Record<PublicAreaFrequency, string> =
   daily: 'Harian',
   weekly: 'Mingguan',
   '3day': '3 Hari Sekali',
+};
+
+export const PUBLIC_AREA_SHIFT_LABELS: Record<PublicAreaShift, string> = {
+  morning: 'Morning',
+  evening: 'Evening',
+  night: 'Night',
 };
