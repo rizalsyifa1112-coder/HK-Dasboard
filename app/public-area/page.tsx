@@ -23,7 +23,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  ClipboardCheck, Plus, RefreshCw, ChevronLeft, ChevronRight, Loader2, CloudCheck,
+  ClipboardCheck, Plus, RefreshCw, ChevronLeft, ChevronRight, Loader2, CheckCircle2,
 } from 'lucide-react';
 
 const SHIFT_OPTIONS: PublicAreaShift[] = ['morning', 'evening', 'night'];
