@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import {
@@ -23,20 +23,29 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  ClipboardCheck, Plus, RefreshCw, ChevronLeft, ChevronRight, Loader2,
+  ClipboardCheck, Plus, RefreshCw, ChevronLeft, ChevronRight, Loader2, CloudCheck,
 } from 'lucide-react';
 
 const SHIFT_OPTIONS: PublicAreaShift[] = ['morning', 'evening', 'night'];
 
+// ⬅️ FIX: pakai komponen tanggal LOKAL (bukan toISOString yang selalu UTC).
+// toISOString() bikin tanggal "mundur" saat sudah lewat tengah malam WIB
+// tapi masih hari sebelumnya di UTC.
+function toLocalDateStr(d: Date) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function todayStr() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return toLocalDateStr(new Date());
 }
 
 function addDays(dateStr: string, delta: number) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + delta);
-  return d.toISOString().slice(0, 10);
+  return toLocalDateStr(d);
 }
 
 export default function PublicAreaPage() {
@@ -48,11 +57,16 @@ export default function PublicAreaPage() {
   const [tasks, setTasks] = useState<PublicAreaTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [manualOpen, setManualOpen] = useState(false);
   const [manualForm, setManualForm] = useState({ kategori: '', zone: '', item_pekerjaan: '' });
   const [savingManual, setSavingManual] = useState(false);
+
+  // ⬅️ BARU: dipakai supaya auto-sync tidak numpuk kalau beberapa perubahan
+  // terjadi hampir bersamaan — cuma request terakhir yang dianggap valid.
+  const syncTicket = useRef(0);
 
   const loadTasks = useCallback(async (targetDate: string) => {
     setLoading(true);
@@ -78,6 +92,30 @@ export default function PublicAreaPage() {
   useEffect(() => {
     loadTasks(date);
   }, [date, loadTasks]);
+
+  // ⬅️ BARU: sync ke spreadsheet otomatis di background, tidak perlu
+  // klik tombol apa pun. Dipanggil setelah setiap perubahan task (klaim,
+  // selesai, set shift, tambah manual). Silent — tidak mengganggu UI kalau
+  // gagal, cukup log ke console dan status "Belum tersinkron" tetap tampil.
+  const autoSync = useCallback(async (targetDate: string) => {
+    const ticket = ++syncTicket.current;
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/public-area/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: targetDate }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (ticket === syncTicket.current) {
+        setLastSyncedAt(new Date());
+      }
+    } catch (err) {
+      console.error('Auto-sync ke spreadsheet gagal:', err);
+    } finally {
+      if (ticket === syncTicket.current) setSyncing(false);
+    }
+  }, []);
 
   const grouped = useMemo(() => {
     const map = new Map<string, PublicAreaTask[]>();
@@ -106,6 +144,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      autoSync(date);
     } catch (err) {
       console.error('Failed to claim task:', err);
     } finally {
@@ -126,6 +165,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      autoSync(date);
     } catch (err) {
       console.error('Failed to complete task:', err);
     } finally {
@@ -143,6 +183,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      autoSync(date);
     } catch (err) {
       console.error('Failed to reset task:', err);
     } finally {
@@ -160,6 +201,7 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
+      autoSync(date);
     } catch (err) {
       console.error('Failed to set shift:', err);
     } finally {
@@ -184,27 +226,11 @@ export default function PublicAreaPage() {
       setManualForm({ kategori: '', zone: '', item_pekerjaan: '' });
       setManualOpen(false);
       await loadTasks(date);
+      autoSync(date);
     } catch (err) {
       console.error('Failed to add manual task:', err);
     } finally {
       setSavingManual(false);
-    }
-  }
-
-  async function syncToSheet() {
-    setSyncing(true);
-    try {
-      const res = await fetch('/api/public-area/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      await loadTasks(date);
-    } catch (err) {
-      console.error('Failed to sync spreadsheet:', err);
-    } finally {
-      setSyncing(false);
     }
   }
 
@@ -217,11 +243,30 @@ export default function PublicAreaPage() {
             Daftar pekerjaan Public Area untuk tanggal terpilih
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* ⬅️ BARU: indikator status sync, bukan tombol yang wajib diklik */}
+          <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
+            {syncing ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Menyinkronkan...
+              </>
+            ) : lastSyncedAt ? (
+              <>
+                <CloudCheck className="h-3.5 w-3.5 text-emerald-500" />
+                Tersinkron {lastSyncedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3.5 w-3.5" />
+                Auto-sync aktif
+              </>
+            )}
+          </div>
           {isManager && (
-            <Button variant="outline" onClick={syncToSheet} disabled={syncing}>
+            <Button variant="outline" size="sm" onClick={() => autoSync(date)} disabled={syncing}>
               {syncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-              Sync Spreadsheet
+              Sync Sekarang
             </Button>
           )}
           {isManager && (
