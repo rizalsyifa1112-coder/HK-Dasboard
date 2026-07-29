@@ -28,12 +28,30 @@ const STATUS_LABELS: Record<string, string> = {
   completed: 'Completed',
 };
 
-function dayNameEn(dateStr: string) {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+const HARI_ID: Record<number, string> = {
+  0: 'Minggu', 1: 'Senin', 2: 'Selasa', 3: 'Rabu', 4: 'Kamis', 5: 'Jumat', 6: 'Sabtu',
+};
+
+const BULAN_ID: Record<number, string> = {
+  0: 'Januari', 1: 'Februari', 2: 'Maret', 3: 'April', 4: 'Mei', 5: 'Juni',
+  6: 'Juli', 7: 'Agustus', 8: 'September', 9: 'Oktober', 10: 'November', 11: 'Desember',
+};
+
+// Ditulis sebagai TEKS ("29 Juli 2026"), bukan tanggal Sheets asli — supaya
+// tampilannya selalu benar apa pun setting locale/format spreadsheet-nya,
+// dan tidak berubah jadi angka serial (46232, dst) di baris hasil sync.
+function tanggalIndonesia(dateStr: string) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getDate()} ${BULAN_ID[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function hariIndonesia(dateStr: string) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return HARI_ID[d.getDay()];
 }
 
 /**
- * Sync 1 tanggal ke sheet Public Area, mengikuti format PERSIS sheet master
+ * Sync 1 tanggal ke sheet Public Area, mengikuti format sheet master
  * (judul + deskripsi + 11 kolom seperti "Jadwal Gabungan Per Tanggal").
  * - Task yang sudah pernah disync (dicocokkan lewat kolom ID tersembunyi)
  *   di-UPDATE di baris yang sama.
@@ -86,8 +104,8 @@ export async function syncPublicAreaTasksToSheet(date: string) {
 
     if (existingRowNum) {
       // Sudah ada barisnya -> update kolom yang bisa berubah saja
-      // (PIC, Status, Catatan), kolom lain (No/Tanggal/Hari/dst) dibiarkan
-      // supaya urutan & data statis tidak keubah tiap sync.
+      // (PIC, Status, Catatan), kolom lain dibiarkan supaya urutan &
+      // data statis (tanggal, hari, dst) tidak keubah tiap sync.
       updates.push({
         range: `${SHEET_TAB_NAME}!I${existingRowNum}:K${existingRowNum}`,
         values: [[t.staff?.full_name ?? '', STATUS_LABELS[t.status] ?? t.status, t.notes ?? '']],
@@ -96,8 +114,8 @@ export async function syncPublicAreaTasksToSheet(date: string) {
       // Task baru -> baris baru, lengkap 12 kolom (termasuk ID di kolom L)
       rowsToAppend.push([
         nextNo,
-        t.task_date,
-        dayNameEn(t.task_date),
+        tanggalIndonesia(t.task_date),
+        hariIndonesia(t.task_date),
         t.template?.frequency ? (FREQUENCY_LABELS[t.template.frequency] ?? t.template.frequency) : '',
         t.template?.no_asal ?? '',
         t.kategori,
