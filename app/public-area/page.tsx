@@ -6,7 +6,9 @@ import { supabase } from '@/lib/supabase';
 import {
   PUBLIC_AREA_STATUS_LABELS,
   PUBLIC_AREA_STATUS_COLORS,
+  PUBLIC_AREA_SHIFT_LABELS,
   type PublicAreaTask,
+  type PublicAreaShift,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -18,8 +20,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   ClipboardCheck, Plus, RefreshCw, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
+
+const SHIFT_OPTIONS: PublicAreaShift[] = ['morning', 'evening', 'night'];
 
 function todayStr() {
   const d = new Date();
@@ -30,25 +37,6 @@ function addDays(dateStr: string, delta: number) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + delta);
   return d.toISOString().slice(0, 10);
-}
-
-// Panggil endpoint sync di background, tanpa mengganggu alur utama kalau
-// gagal (mis. koneksi lambat). Dipakai supaya spreadsheet ikut ter-update
-// otomatis tiap kali staff mengubah status task, tanpa perlu klik tombol
-// "Sync Spreadsheet" manual.
-async function syncToSheetSilently(targetDate: string) {
-  try {
-    const res = await fetch('/api/public-area/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: targetDate }),
-    });
-    if (!res.ok) {
-      console.error('Auto-sync spreadsheet gagal:', await res.text());
-    }
-  } catch (err) {
-    console.error('Auto-sync spreadsheet gagal:', err);
-  }
 }
 
 export default function PublicAreaPage() {
@@ -69,7 +57,6 @@ export default function PublicAreaPage() {
   const loadTasks = useCallback(async (targetDate: string) => {
     setLoading(true);
     try {
-      // pastikan task hasil generate otomatis sudah ada untuk tanggal ini
       await supabase.rpc('generate_public_area_tasks', { p_date: targetDate });
 
       const { data, error } = await supabase
@@ -119,7 +106,6 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
-      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to claim task:', err);
     } finally {
@@ -140,7 +126,6 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
-      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to complete task:', err);
     } finally {
@@ -158,9 +143,25 @@ export default function PublicAreaPage() {
         .eq('id', task.id);
       if (error) throw error;
       await loadTasks(date);
-      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to reset task:', err);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function setShift(task: PublicAreaTask, shift: PublicAreaShift) {
+    if (!isManager) return;
+    setSavingId(task.id);
+    try {
+      const { error } = await supabase
+        .from('public_area_tasks')
+        .update({ shift })
+        .eq('id', task.id);
+      if (error) throw error;
+      await loadTasks(date);
+    } catch (err) {
+      console.error('Failed to set shift:', err);
     } finally {
       setSavingId(null);
     }
@@ -183,7 +184,6 @@ export default function PublicAreaPage() {
       setManualForm({ kategori: '', zone: '', item_pekerjaan: '' });
       setManualOpen(false);
       await loadTasks(date);
-      syncToSheetSilently(date);
     } catch (err) {
       console.error('Failed to add manual task:', err);
     } finally {
@@ -265,7 +265,6 @@ export default function PublicAreaPage() {
         </div>
       </div>
 
-      {/* Date navigator */}
       <div className="flex items-center gap-2">
         <Button variant="outline" size="icon" onClick={() => setDate((d) => addDays(d, -1))}>
           <ChevronLeft className="h-4 w-4" />
@@ -286,7 +285,6 @@ export default function PublicAreaPage() {
         )}
       </div>
 
-      {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Task</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{summary.total}</CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Belum Dikerjakan</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{summary.pending}</CardContent></Card>
@@ -294,7 +292,6 @@ export default function PublicAreaPage() {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Selesai</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{summary.done}</CardContent></Card>
       </div>
 
-      {/* Task list */}
       {loading ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin mr-2" /> Memuat task...
@@ -324,6 +321,11 @@ export default function PublicAreaPage() {
                               {PUBLIC_AREA_STATUS_LABELS[task.status]}
                             </Badge>
                             {task.is_manual && <Badge variant="outline" className="text-[10px]">Manual</Badge>}
+                            {!isManager && task.shift && (
+                              <Badge variant="outline" className="text-[10px]">
+                                {PUBLIC_AREA_SHIFT_LABELS[task.shift]}
+                              </Badge>
+                            )}
                           </div>
                           <p className="text-sm mt-1">{task.item_pekerjaan}</p>
                           {task.staff?.full_name && (
@@ -345,6 +347,24 @@ export default function PublicAreaPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                          {isManager && (
+                            <Select
+                              value={task.shift ?? undefined}
+                              onValueChange={(val) => setShift(task, val as PublicAreaShift)}
+                              disabled={savingId === task.id}
+                            >
+                              <SelectTrigger className="w-[110px] h-8 text-xs">
+                                <SelectValue placeholder="Shift" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {SHIFT_OPTIONS.map((s) => (
+                                  <SelectItem key={s} value={s} className="text-xs">
+                                    {PUBLIC_AREA_SHIFT_LABELS[s]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                           {canClaim && (
                             <Button size="sm" onClick={() => claimTask(task)} disabled={savingId === task.id}>
                               {savingId === task.id && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
