@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
@@ -24,7 +24,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Download, Plus, HandCoins, Loader2,
 } from 'lucide-react';
-import { type Loan, type Profile, type LoanUnit, type Room } from '@/lib/types';
+import { type Loan, type Profile, type LoanItem, type LoanUnit, type Room } from '@/lib/types';
 
 const LOAN_STATUS_LABELS: Record<Loan['status'], string> = {
   active: 'Dipinjam',
@@ -63,6 +63,7 @@ export default function LoanManagementPage() {
   const { toast } = useToast();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
+  const [loanItems, setLoanItems] = useState<LoanItem[]>([]);
   const [loanUnits, setLoanUnits] = useState<LoanUnit[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +74,7 @@ export default function LoanManagementPage() {
   const [roomInput, setRoomInput] = useState('');
   const [form, setForm] = useState({
     staff_id: '',
+    loan_item_id: '', // kategori/jenis barang yang dipilih dulu
     loan_unit_id: '',
     room_id: '',
     notes: '',
@@ -83,21 +85,20 @@ export default function LoanManagementPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [loanRes, staffRes, unitRes, roomRes] = await Promise.all([
+      const [loanRes, staffRes, itemRes, unitRes, roomRes] = await Promise.all([
         supabase
           .from('loans')
           .select('*, staff:profiles(*), loan_item:loan_items(*), loan_unit:loan_units(*), room:rooms(*)')
           .order('loaned_at', { ascending: false }),
         supabase.from('profiles').select('*').eq('active', true).order('full_name'),
-        supabase
-          .from('loan_units')
-          .select('*, loan_item:loan_items(*)')
-          .order('unit_number'),
+        supabase.from('loan_items').select('*').eq('active', true).order('name'),
+        supabase.from('loan_units').select('*').order('unit_number'),
         supabase.from('rooms').select('*').order('number'),
       ]);
 
       setLoans((loanRes.data as Loan[]) || []);
       setStaff((staffRes.data as Profile[]) || []);
+      setLoanItems((itemRes.data as LoanItem[]) || []);
       setLoanUnits((unitRes.data as LoanUnit[]) || []);
       setRooms((roomRes.data as Room[]) || []);
     } catch (err) {
@@ -120,15 +121,24 @@ export default function LoanManagementPage() {
     return matchSearch;
   });
 
-  const selectedUnit = loanUnits.find((u) => u.id === form.loan_unit_id);
+  // Unit-unit di bawah kategori (loan_item) yang sedang dipilih di step 1
+  const unitsForSelectedItem = useMemo(
+    () => loanUnits.filter((u) => u.loan_item_id === form.loan_item_id).sort((a, b) => a.unit_number - b.unit_number),
+    [loanUnits, form.loan_item_id]
+  );
 
-  // Urutkan: kelompok per nama item, lalu per nomor unit — biar dropdown
-  // rapi (Setrika Nomor 1, Nomor 2, ... lalu Sarung Nomor 1, dst)
-  const sortedUnits = [...loanUnits].sort((a, b) => {
-    const nameCompare = (a.loan_item?.name ?? '').localeCompare(b.loan_item?.name ?? '');
-    if (nameCompare !== 0) return nameCompare;
-    return a.unit_number - b.unit_number;
-  });
+  const availableCountByItem = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const u of loanUnits) {
+      if (u.status === 'available') {
+        map.set(u.loan_item_id, (map.get(u.loan_item_id) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [loanUnits]);
+
+  const selectedUnit = loanUnits.find((u) => u.id === form.loan_unit_id);
+  const selectedItem = loanItems.find((li) => li.id === form.loan_item_id);
 
   const matchedRoom = rooms.find((r) => r.number.toLowerCase() === roomInput.trim().toLowerCase());
   const roomNotFound = roomInput.trim().length > 0 && !matchedRoom;
@@ -139,8 +149,14 @@ export default function LoanManagementPage() {
     setForm((f) => ({ ...f, room_id: match ? match.id : '' }));
   };
 
+  const handleItemChange = (loanItemId: string) => {
+    // Ganti kategori -> reset pilihan nomor unit (supaya tidak nyangkut
+    // ke unit kategori sebelumnya)
+    setForm((f) => ({ ...f, loan_item_id: loanItemId, loan_unit_id: '' }));
+  };
+
   const resetForm = () => {
-    setForm({ staff_id: '', loan_unit_id: '', room_id: '', notes: '' });
+    setForm({ staff_id: '', loan_item_id: '', loan_unit_id: '', room_id: '', notes: '' });
     setRoomInput('');
   };
 
@@ -149,8 +165,12 @@ export default function LoanManagementPage() {
       toast({ title: 'Validasi', description: 'Pilih staff yang meminjamkan', variant: 'destructive' });
       return;
     }
+    if (!form.loan_item_id) {
+      toast({ title: 'Validasi', description: 'Pilih kategori barang', variant: 'destructive' });
+      return;
+    }
     if (!form.loan_unit_id) {
-      toast({ title: 'Validasi', description: 'Pilih barang yang dipinjam', variant: 'destructive' });
+      toast({ title: 'Validasi', description: 'Pilih nomor barang', variant: 'destructive' });
       return;
     }
     if (roomInput.trim() && !matchedRoom) {
@@ -163,7 +183,7 @@ export default function LoanManagementPage() {
     }
     setSaving(true);
     try {
-      const itemLabel = `${selectedUnit.loan_item?.name ?? ''} - Nomor ${selectedUnit.unit_number}`;
+      const itemLabel = `${selectedItem?.name ?? ''} - Nomor ${selectedUnit.unit_number}`;
 
       const { error } = await supabase.from('loans').insert({
         staff_id: form.staff_id,
@@ -211,7 +231,6 @@ export default function LoanManagementPage() {
       const { error } = await supabase.from('loans').update(updates).eq('id', loan.id);
       if (error) throw error;
 
-      // Sinkronkan status unit fisik sesuai status loan barunya
       if (loan.loan_unit_id && newStatus !== loan.status) {
         const unitStatusMap: Record<Loan['status'], LoanUnit['status']> = {
           active: 'on_loan',
@@ -409,27 +428,50 @@ export default function LoanManagementPage() {
               )}
             </div>
 
+            {/* STEP 1: pilih kategori barang */}
             <div className="space-y-1.5">
-              <Label>Item</Label>
-              <Select value={form.loan_unit_id} onValueChange={(v) => setForm({ ...form, loan_unit_id: v })}>
+              <Label>Kategori Barang</Label>
+              <Select value={form.loan_item_id} onValueChange={handleItemChange}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Pilih barang" />
+                  <SelectValue placeholder="Pilih kategori barang" />
                 </SelectTrigger>
                 <SelectContent>
-                  {sortedUnits.map((u) => (
-                    <SelectItem key={u.id} value={u.id} disabled={u.status !== 'available'}>
-                      {u.loan_item?.name ?? '-'} - Nomor {u.unit_number}
-                      {u.status !== 'available' && ` (${UNIT_STATUS_LABELS[u.status]})`}
-                    </SelectItem>
-                  ))}
+                  {loanItems.map((li) => {
+                    const avail = availableCountByItem.get(li.id) ?? 0;
+                    return (
+                      <SelectItem key={li.id} value={li.id} disabled={avail === 0}>
+                        {li.name} ({li.code}) — {avail} tersedia
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
-              {loanUnits.length === 0 && (
+              {loanItems.length === 0 && (
                 <p className="text-xs text-muted-foreground">
                   Belum ada data barang. Tambahkan dulu di Loan Master Data.
                 </p>
               )}
             </div>
+
+            {/* STEP 2: pilih nomor unit, cuma muncul setelah kategori dipilih */}
+            {form.loan_item_id && (
+              <div className="space-y-1.5">
+                <Label>Nomor Barang</Label>
+                <Select value={form.loan_unit_id} onValueChange={(v) => setForm({ ...form, loan_unit_id: v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih nomor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {unitsForSelectedItem.map((u) => (
+                      <SelectItem key={u.id} value={u.id} disabled={u.status !== 'available'}>
+                        Nomor {u.unit_number}
+                        {u.status !== 'available' && ` (${UNIT_STATUS_LABELS[u.status]})`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
