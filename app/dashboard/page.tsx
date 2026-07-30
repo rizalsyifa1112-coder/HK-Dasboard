@@ -3,14 +3,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { PageHeader } from '@/components/page-header';
+import { DashboardHero } from '@/components/dashboard-hero';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   BedDouble, CheckCircle2, AlertCircle, DoorOpen, Users,
-  Shirt, Layers, TrendingUp, Clock, Sparkles, Download, Percent, LogOut,
+  Shirt, Layers, TrendingUp, Clock, Sparkles, Percent, LogOut,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -178,16 +177,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      <PageHeader
-        title="Dashboard"
-        description={`Welcome back, ${profile?.full_name ?? 'User'}`}
-        actions={
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Sync Spreadsheet
-          </Button>
-        }
-      />
+      <DashboardHero userName={profile?.full_name ?? 'User'} />
 
       {/* Occupancy Highlight Card */}
       <Card className="overflow-hidden">
