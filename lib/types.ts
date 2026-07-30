@@ -232,6 +232,7 @@ export interface Loan {
   loan_number: string;
   staff_id: string | null;
   loan_item_id: string | null;
+  loan_unit_id: string | null;
   room_id: string | null;
   item_name: string;
   quantity: number;
@@ -243,6 +244,7 @@ export interface Loan {
   updated_at: string;
   staff?: Profile | null;
   loan_item?: LoanItem | null;
+  loan_unit?: LoanUnit | null;
   room?: Room | null;
 }
 
@@ -369,6 +371,21 @@ export interface LoanItem {
   active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/* ===== Loan Units (per-unit bernomor) ===== */
+
+export type LoanUnitStatus = 'available' | 'on_loan' | 'lost' | 'damaged';
+
+export interface LoanUnit {
+  id: string;
+  loan_item_id: string;
+  unit_number: number;
+  code: string;
+  status: LoanUnitStatus;
+  created_at: string;
+  updated_at: string;
+  loan_item?: LoanItem | null;
 }
 
 /* ===== Public Area ===== */
