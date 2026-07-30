@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { PageHeader } from '@/components/page-header';
@@ -24,7 +24,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Search, RefreshCw, Download, Plus, HandCoins, Loader2,
 } from 'lucide-react';
-import { type Loan, type Profile, type LoanItem, type Room } from '@/lib/types';
+import { type Loan, type Profile, type LoanUnit, type Room } from '@/lib/types';
 
 const LOAN_STATUS_LABELS: Record<Loan['status'], string> = {
   active: 'Dipinjam',
@@ -38,6 +38,13 @@ const LOAN_STATUS_COLORS: Record<Loan['status'], string> = {
   returned: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
   lost: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
   damaged: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+};
+
+const UNIT_STATUS_LABELS: Record<LoanUnit['status'], string> = {
+  available: 'Tersedia',
+  on_loan: 'Sedang Dipinjam',
+  lost: 'Hilang',
+  damaged: 'Rusak',
 };
 
 function formatDateTime(value: string | null): string {
@@ -56,7 +63,7 @@ export default function LoanManagementPage() {
   const { toast } = useToast();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
-  const [loanItems, setLoanItems] = useState<LoanItem[]>([]);
+  const [loanUnits, setLoanUnits] = useState<LoanUnit[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -66,9 +73,8 @@ export default function LoanManagementPage() {
   const [roomInput, setRoomInput] = useState('');
   const [form, setForm] = useState({
     staff_id: '',
-    loan_item_id: '',
+    loan_unit_id: '',
     room_id: '',
-    quantity: '',
     notes: '',
   });
 
@@ -77,19 +83,22 @@ export default function LoanManagementPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [loanRes, staffRes, loanItemRes, roomRes] = await Promise.all([
+      const [loanRes, staffRes, unitRes, roomRes] = await Promise.all([
         supabase
           .from('loans')
-          .select('*, staff:profiles(*), loan_item:loan_items(*), room:rooms(*)')
+          .select('*, staff:profiles(*), loan_item:loan_items(*), loan_unit:loan_units(*), room:rooms(*)')
           .order('loaned_at', { ascending: false }),
         supabase.from('profiles').select('*').eq('active', true).order('full_name'),
-        supabase.from('loan_items').select('*').eq('active', true).order('name'),
+        supabase
+          .from('loan_units')
+          .select('*, loan_item:loan_items(*)')
+          .order('unit_number'),
         supabase.from('rooms').select('*').order('number'),
       ]);
 
       setLoans((loanRes.data as Loan[]) || []);
       setStaff((staffRes.data as Profile[]) || []);
-      setLoanItems((loanItemRes.data as LoanItem[]) || []);
+      setLoanUnits((unitRes.data as LoanUnit[]) || []);
       setRooms((roomRes.data as Room[]) || []);
     } catch (err) {
       console.error('Error fetching loans:', err);
@@ -111,15 +120,17 @@ export default function LoanManagementPage() {
     return matchSearch;
   });
 
-  const selectedLoanItem = loanItems.find((li) => li.id === form.loan_item_id);
-  const requestedQty = parseInt(form.quantity, 10) || 1;
-  const insufficientStock = !!selectedLoanItem && requestedQty > selectedLoanItem.stock;
+  const selectedUnit = loanUnits.find((u) => u.id === form.loan_unit_id);
 
-  // Cari kamar yang cocok persis dengan nomor yang diketik
-  const matchedRoom = useMemo(
-    () => rooms.find((r) => r.number.toLowerCase() === roomInput.trim().toLowerCase()),
-    [rooms, roomInput]
-  );
+  // Urutkan: kelompok per nama item, lalu per nomor unit — biar dropdown
+  // rapi (Setrika Nomor 1, Nomor 2, ... lalu Sarung Nomor 1, dst)
+  const sortedUnits = [...loanUnits].sort((a, b) => {
+    const nameCompare = (a.loan_item?.name ?? '').localeCompare(b.loan_item?.name ?? '');
+    if (nameCompare !== 0) return nameCompare;
+    return a.unit_number - b.unit_number;
+  });
+
+  const matchedRoom = rooms.find((r) => r.number.toLowerCase() === roomInput.trim().toLowerCase());
   const roomNotFound = roomInput.trim().length > 0 && !matchedRoom;
 
   const handleRoomInputChange = (value: string) => {
@@ -129,7 +140,7 @@ export default function LoanManagementPage() {
   };
 
   const resetForm = () => {
-    setForm({ staff_id: '', loan_item_id: '', room_id: '', quantity: '', notes: '' });
+    setForm({ staff_id: '', loan_unit_id: '', room_id: '', notes: '' });
     setRoomInput('');
   };
 
@@ -138,7 +149,7 @@ export default function LoanManagementPage() {
       toast({ title: 'Validasi', description: 'Pilih staff yang meminjamkan', variant: 'destructive' });
       return;
     }
-    if (!form.loan_item_id) {
+    if (!form.loan_unit_id) {
       toast({ title: 'Validasi', description: 'Pilih barang yang dipinjam', variant: 'destructive' });
       return;
     }
@@ -146,34 +157,34 @@ export default function LoanManagementPage() {
       toast({ title: 'Validasi', description: 'Nomor kamar tidak ditemukan di data kamar', variant: 'destructive' });
       return;
     }
-    if (insufficientStock) {
-      toast({ title: 'Validasi', description: 'Jumlah melebihi stok yang tersedia', variant: 'destructive' });
+    if (!selectedUnit || selectedUnit.status !== 'available') {
+      toast({ title: 'Validasi', description: 'Barang ini sedang tidak tersedia', variant: 'destructive' });
       return;
     }
     setSaving(true);
     try {
+      const itemLabel = `${selectedUnit.loan_item?.name ?? ''} - Nomor ${selectedUnit.unit_number}`;
+
       const { error } = await supabase.from('loans').insert({
         staff_id: form.staff_id,
-        loan_item_id: form.loan_item_id,
+        loan_item_id: selectedUnit.loan_item_id,
+        loan_unit_id: selectedUnit.id,
         room_id: form.room_id || null,
-        item_name: selectedLoanItem?.name ?? '',
-        quantity: requestedQty,
+        item_name: itemLabel,
+        quantity: 1,
         notes: form.notes || null,
         status: 'active',
         loaned_at: new Date().toISOString(),
       });
       if (error) throw error;
 
-      // ⬅️ BARU: kurangi stock barang di loan_items sesuai quantity yang baru dipinjam,
-      // supaya jumlah stock yang tampil di dropdown "Item" selalu real-time akurat.
-      if (selectedLoanItem) {
-        const { error: stockError } = await supabase
-          .from('loan_items')
-          .update({ stock: selectedLoanItem.stock - requestedQty })
-          .eq('id', selectedLoanItem.id);
-        if (stockError) {
-          console.error('Stock decrement error:', stockError);
-        }
+      const { error: unitError } = await supabase
+        .from('loan_units')
+        .update({ status: 'on_loan' })
+        .eq('id', selectedUnit.id);
+      if (unitError) {
+        console.error('Unit status update error:', unitError);
+        toast({ title: 'Peringatan', description: 'Loan tercatat, tapi status barang gagal diupdate. Cek manual.', variant: 'destructive' });
       }
 
       toast({ title: 'Berhasil', description: 'Barang dicatat sebagai dipinjam' });
@@ -194,25 +205,26 @@ export default function LoanManagementPage() {
       const updates: Record<string, unknown> = { status: newStatus };
       if (newStatus === 'returned' || newStatus === 'lost' || newStatus === 'damaged') {
         updates.returned_at = new Date().toISOString();
+      } else if (newStatus === 'active') {
+        updates.returned_at = null;
       }
       const { error } = await supabase.from('loans').update(updates).eq('id', loan.id);
       if (error) throw error;
 
-      // ⬅️ BARU: kembalikan stock ke loan_items HANYA saat barang benar-benar
-      // dikembalikan (status "returned"), dan HANYA jika sebelumnya belum berstatus
-      // "returned" — supaya stock tidak nambah dobel kalau tombol diklik ulang.
-      // Untuk status "Hilang"/"Rusak" stock sengaja TIDAK dikembalikan, karena
-      // barang secara fisik memang sudah tidak ada.
-      if (newStatus === 'returned' && loan.status !== 'returned' && loan.loan_item_id) {
-        const currentItem = loanItems.find((li) => li.id === loan.loan_item_id);
-        if (currentItem) {
-          const { error: stockError } = await supabase
-            .from('loan_items')
-            .update({ stock: currentItem.stock + loan.quantity })
-            .eq('id', loan.loan_item_id);
-          if (stockError) {
-            console.error('Stock increment error:', stockError);
-          }
+      // Sinkronkan status unit fisik sesuai status loan barunya
+      if (loan.loan_unit_id && newStatus !== loan.status) {
+        const unitStatusMap: Record<Loan['status'], LoanUnit['status']> = {
+          active: 'on_loan',
+          returned: 'available',
+          lost: 'lost',
+          damaged: 'damaged',
+        };
+        const { error: unitError } = await supabase
+          .from('loan_units')
+          .update({ status: unitStatusMap[newStatus] })
+          .eq('id', loan.loan_unit_id);
+        if (unitError) {
+          console.error('Unit status sync error:', unitError);
         }
       }
 
@@ -251,7 +263,6 @@ export default function LoanManagementPage() {
         }
       />
 
-      {/* Search */}
       <div className="relative max-w-xs">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
@@ -262,7 +273,6 @@ export default function LoanManagementPage() {
         />
       </div>
 
-      {/* Table */}
       {loading ? (
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -285,7 +295,6 @@ export default function LoanManagementPage() {
                 <TableHead>Staff</TableHead>
                 <TableHead>Kamar</TableHead>
                 <TableHead>Item</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Dipinjam</TableHead>
                 <TableHead>Dikembalikan</TableHead>
@@ -308,13 +317,12 @@ export default function LoanManagementPage() {
                   </TableCell>
                   <TableCell>
                     {l.item_name}
-                    {l.loan_item && (
+                    {l.loan_unit && (
                       <span className="ml-1.5 text-xs text-muted-foreground">
-                        ({l.loan_item.code})
+                        ({l.loan_unit.code})
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-right">{l.quantity}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={cn('text-xs', LOAN_STATUS_COLORS[l.status])}>
                       {LOAN_STATUS_LABELS[l.status]}
@@ -352,7 +360,6 @@ export default function LoanManagementPage() {
         </div>
       )}
 
-      {/* Create Dialog */}
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => {
@@ -404,39 +411,22 @@ export default function LoanManagementPage() {
 
             <div className="space-y-1.5">
               <Label>Item</Label>
-              <Select value={form.loan_item_id} onValueChange={(v) => setForm({ ...form, loan_item_id: v })}>
+              <Select value={form.loan_unit_id} onValueChange={(v) => setForm({ ...form, loan_unit_id: v })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Pilih barang" />
                 </SelectTrigger>
                 <SelectContent>
-                  {loanItems.map((li) => (
-                    <SelectItem key={li.id} value={li.id} disabled={li.stock <= 0}>
-                      {li.name} ({li.code}) — stock: {li.stock} {li.unit}
+                  {sortedUnits.map((u) => (
+                    <SelectItem key={u.id} value={u.id} disabled={u.status !== 'available'}>
+                      {u.loan_item?.name ?? '-'} - Nomor {u.unit_number}
+                      {u.status !== 'available' && ` (${UNIT_STATUS_LABELS[u.status]})`}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {loanItems.length === 0 && (
+              {loanUnits.length === 0 && (
                 <p className="text-xs text-muted-foreground">
                   Belum ada data barang. Tambahkan dulu di Loan Master Data.
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="quantity">Quantity</Label>
-              <Input
-                id="quantity"
-                type="number"
-                min={1}
-                max={selectedLoanItem?.stock}
-                value={form.quantity}
-                onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                placeholder="1"
-              />
-              {insufficientStock && (
-                <p className="text-xs text-destructive">
-                  Stok tersisa hanya {selectedLoanItem?.stock} {selectedLoanItem?.unit}.
                 </p>
               )}
             </div>
@@ -454,7 +444,7 @@ export default function LoanManagementPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving || insufficientStock}>
+            <Button onClick={handleCreate} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create
             </Button>
