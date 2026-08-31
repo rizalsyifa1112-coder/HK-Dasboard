@@ -1,0 +1,94 @@
+diff --git a/lib/public-area-sync.ts b/lib/public-area-sync.ts
+index 82b7219..b9ec28a 100644
+--- a/lib/public-area-sync.ts
++++ b/lib/public-area-sync.ts
+@@ -1,4 +1,4 @@
+-import { readRange, writeRange, appendRows } from '@/lib/google-sheets';
++import { readRange, writeRange, appendRows, findTabByName, duplicateTemplateTab } from '@/lib/google-sheets';
+ import { createClient } from '@supabase/supabase-js';
+ 
+ function getServiceSupabase() {
+@@ -8,7 +8,14 @@ function getServiceSupabase() {
+   );
+ }
+ 
+-const SHEET_TAB_NAME = 'Public Area';
++// Nama tab dibuat per-bulan, contoh: "Public Area - Agustus 2026", supaya
++// data tiap bulan tidak menumpuk di 1 tab dan gampang dihitung summary-nya.
++// Tab baru dibuat otomatis (duplikat dari tab TEMPLATE) kalau bulan itu
++// belum punya tab.
++function getMonthTabName(dateStr: string): string {
++  const d = new Date(dateStr + 'T00:00:00');
++  return `Public Area - ${BULAN_ID[d.getMonth()]} ${d.getFullYear()}`;
++}
+ 
+ const TITLE_ROW = ['JADWAL GABUNGAN PER TANGGAL — PUBLIC AREA (SYNC OTOMATIS DARI WEBSITE)'];
+ const DESC_ROW = ["Auto-sync dari website. Kolom PIC (Staff), Status & Catatan terisi otomatis sesuai progres staff. Kolom 'ID' (paling kanan) jangan diubah/dihapus — dipakai sistem untuk mencocokkan baris."];
+@@ -63,6 +70,20 @@ export async function syncPublicAreaTasksToSheet(date: string) {
+     throw new Error('PUBLIC_AREA_SHEET_ID belum di-set di environment variables');
+   }
+ 
++  // 0) Tab bulanan sesuai tanggal task, contoh "Public Area - Agustus 2026".
++  //    Kalau tab bulan itu belum ada, buat otomatis dengan duplikat tab
++  //    TEMPLATE (PUBLIC_AREA_TEMPLATE_SHEET_ID = sheetId/gid tab template,
++  //    bukan nama tab).
++  const tabName = getMonthTabName(date);
++  const existingTabId = await findTabByName(spreadsheetId, tabName);
++  if (!existingTabId) {
++    const templateSheetIdRaw = process.env.PUBLIC_AREA_TEMPLATE_SHEET_ID;
++    if (!templateSheetIdRaw) {
++      throw new Error('PUBLIC_AREA_TEMPLATE_SHEET_ID belum di-set di environment variables (perlu untuk membuat tab bulan baru)');
++    }
++    await duplicateTemplateTab(spreadsheetId, Number(templateSheetIdRaw), tabName);
++  }
++
+   const supabase = getServiceSupabase();
+   const { data: tasks, error } = await supabase
+     .from('public_area_tasks')
+@@ -75,16 +96,16 @@ export async function syncPublicAreaTasksToSheet(date: string) {
+ 
+   // 1) Pastikan judul + deskripsi + header sudah ada (cuma ditulis kalau
+   //    sheet memang masih benar-benar kosong)
+-  const existingTitle = await readRange(spreadsheetId, `${SHEET_TAB_NAME}!A1:A1`);
++  const existingTitle = await readRange(spreadsheetId, `${tabName}!A1:A1`);
+   if (existingTitle.length === 0 || !existingTitle[0]?.[0]) {
+-    await writeRange(spreadsheetId, `${SHEET_TAB_NAME}!A1:A1`, [TITLE_ROW]);
+-    await writeRange(spreadsheetId, `${SHEET_TAB_NAME}!A2:A2`, [DESC_ROW]);
+-    await writeRange(spreadsheetId, `${SHEET_TAB_NAME}!A3:L3`, [HEADER_ROW]);
++    await writeRange(spreadsheetId, `${tabName}!A1:A1`, [TITLE_ROW]);
++    await writeRange(spreadsheetId, `${tabName}!A2:A2`, [DESC_ROW]);
++    await writeRange(spreadsheetId, `${tabName}!A3:L3`, [HEADER_ROW]);
+   }
+ 
+   // 2) Baca semua baris data yang sudah ada (mulai baris 4), cari kolom ID
+   //    (kolom L / index ke-11) untuk tahu task mana yang sudah punya baris
+-  const existingRows = await readRange(spreadsheetId, `${SHEET_TAB_NAME}!A${DATA_START_ROW}:L100000`);
++  const existingRows = await readRange(spreadsheetId, `${tabName}!A${DATA_START_ROW}:L100000`);
+   const rowNumberByTaskId = new Map<string, number>();
+   let lastRowNumber = DATA_START_ROW - 1;
+   existingRows.forEach((row, idx) => {
+@@ -107,7 +128,7 @@ export async function syncPublicAreaTasksToSheet(date: string) {
+       // (PIC, Status, Catatan), kolom lain dibiarkan supaya urutan &
+       // data statis (tanggal, hari, dst) tidak keubah tiap sync.
+       updates.push({
+-        range: `${SHEET_TAB_NAME}!I${existingRowNum}:K${existingRowNum}`,
++        range: `${tabName}!I${existingRowNum}:K${existingRowNum}`,
+         values: [[t.staff?.full_name ?? '', STATUS_LABELS[t.status] ?? t.status, t.notes ?? '']],
+       });
+     } else {
+@@ -135,7 +156,7 @@ export async function syncPublicAreaTasksToSheet(date: string) {
+   }
+ 
+   if (rowsToAppend.length > 0) {
+-    await appendRows(spreadsheetId, `${SHEET_TAB_NAME}!A3:L3`, rowsToAppend);
++    await appendRows(spreadsheetId, `${tabName}!A3:L3`, rowsToAppend);
+   }
+ 
+   await supabase
+@@ -143,5 +164,5 @@ export async function syncPublicAreaTasksToSheet(date: string) {
+     .update({ synced_at: new Date().toISOString() })
+     .eq('task_date', date);
+ 
+-  return { updated: updates.length, appended: rowsToAppend.length };
++  return { updated: updates.length, appended: rowsToAppend.length, tabName };
+ }
