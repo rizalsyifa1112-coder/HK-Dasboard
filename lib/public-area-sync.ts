@@ -164,5 +164,122 @@ export async function syncPublicAreaTasksToSheet(date: string) {
     .update({ synced_at: new Date().toISOString() })
     .eq('task_date', date);
 
+  // 4) Update tab Summary (akumulasi all-time, dari 59 master project).
+  //    Dibungkus try/catch sendiri supaya kalau ada masalah di sini
+  //    (mis. tab "Summary" belum dibuat), sync utama tetap dianggap
+  //    berhasil dan tidak melempar error ke pemanggil.
+  try {
+    await updatePublicAreaSummary(spreadsheetId, supabase);
+  } catch (err) {
+    console.error('Update summary Public Area gagal:', err);
+  }
+
   return { updated: updates.length, appended: rowsToAppend.length, tabName };
+}
+
+const SUMMARY_TAB_NAME = 'Summary';
+
+/**
+ * Hitung pencapaian akumulasi (all-time) dari seluruh master project
+ * Public Area: dari total master project (public_area_task_templates),
+ * berapa yang SUDAH PERNAH selesai minimal 1x (status completed di
+ * public_area_tasks, kapan pun tanggalnya) — lalu tulis ke tab "Summary".
+ * Tab "Summary" harus sudah ada (dibuat manual sekali, kosong juga tidak
+ * masalah, tab ini ditulis penuh oleh fungsi ini setiap kali sync jalan).
+ */
+export async function updatePublicAreaSummary(
+  spreadsheetId: string,
+  supabase: ReturnType<typeof getServiceSupabase>
+) {
+  const { data: templates, error: templatesError } = await supabase
+    .from('public_area_task_templates')
+    .select('id, no_asal, kategori')
+    .order('no_asal', { ascending: true });
+  if (templatesError) throw templatesError;
+
+  const { data: completedTasks, error: completedError } = await supabase
+    .from('public_area_tasks')
+    .select('template_id')
+    .eq('status', 'completed')
+    .not('template_id', 'is', null);
+  if (completedError) throw completedError;
+
+  const achievedIds = new Set((completedTasks ?? []).map((t) => t.template_id));
+
+  const totalMaster = templates?.length ?? 0;
+  const achievedMaster = (templates ?? []).filter((tpl) => achievedIds.has(tpl.id)).length;
+  const persen = totalMaster > 0 ? (achievedMaster / totalMaster) * 100 : 0;
+
+  // Breakdown per kategori, urutan sesuai kemunculan pertama di master list
+  const kategoriOrder: string[] = [];
+  const kategoriStats = new Map<string, { total: number; achieved: number }>();
+  for (const tpl of templates ?? []) {
+    const kat = tpl.kategori ?? '(Tanpa Kategori)';
+    if (!kategoriStats.has(kat)) {
+      kategoriStats.set(kat, { total: 0, achieved: 0 });
+      kategoriOrder.push(kat);
+    }
+    const stat = kategoriStats.get(kat)!;
+    stat.total += 1;
+    if (achievedIds.has(tpl.id)) stat.achieved += 1;
+  }
+
+  // Breakdown per bulan: dari semua task yang pernah dibuat (task_date apa
+  // pun), berapa % yang berstatus completed di bulan itu. Ini beda dari
+  // stat di atas (yang "pernah selesai minimal 1x" per master project) —
+  // ini murni volume task per bulan.
+  const { data: allTasks, error: allTasksError } = await supabase
+    .from('public_area_tasks')
+    .select('task_date, status');
+  if (allTasksError) throw allTasksError;
+
+  const monthStats = new Map<string, { total: number; completed: number; label: string; sortKey: string }>();
+  for (const t of allTasks ?? []) {
+    if (!t.task_date) continue;
+    const [yStr, mStr] = String(t.task_date).split('-');
+    const y = Number(yStr);
+    const m = Number(mStr) - 1;
+    if (!yStr || Number.isNaN(y) || Number.isNaN(m)) continue;
+    const key = `${yStr}-${mStr}`;
+    if (!monthStats.has(key)) {
+      monthStats.set(key, { total: 0, completed: 0, label: `${BULAN_ID[m]} ${y}`, sortKey: key });
+    }
+    const stat = monthStats.get(key)!;
+    stat.total += 1;
+    if (t.status === 'completed') stat.completed += 1;
+  }
+  const monthRows = Array.from(monthStats.values()).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  const now = new Date();
+  const rows: (string | number)[][] = [
+    ['SUMMARY PENCAPAIAN PUBLIC AREA — AKUMULASI ALL TIME'],
+    [`Auto-update setiap kali ada sync. Terakhir diperbarui: ${now.toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}`],
+    [],
+    ['Total Master Project', totalMaster],
+    ['Sudah Pernah Selesai (≥1x)', achievedMaster],
+    ['Persentase Pencapaian', `${persen.toFixed(1)}%`],
+    [],
+    ['Kategori', 'Total', 'Selesai', 'Persentase'],
+    ...kategoriOrder.map((kat) => {
+      const s = kategoriStats.get(kat)!;
+      const p = s.total > 0 ? (s.achieved / s.total) * 100 : 0;
+      return [kat, s.total, s.achieved, `${p.toFixed(1)}%`];
+    }),
+    [],
+    ['Pencapaian Per Bulan', '', '', ''],
+    ['Bulan', 'Total Task', 'Selesai', 'Persentase'],
+    ...monthRows.map((s) => {
+      const p = s.total > 0 ? (s.completed / s.total) * 100 : 0;
+      return [s.label, s.total, s.completed, `${p.toFixed(1)}%`];
+    }),
+  ];
+
+  // Bersihkan isi lama dulu (kalau kategori/bulan berkurang, baris sisa
+  // tidak nyangkut), baru tulis ulang penuh.
+  await writeRange(spreadsheetId, `${SUMMARY_TAB_NAME}!A1:D300`, Array.from({ length: 300 }, () => ['', '', '', '']));
+  await writeRange(spreadsheetId, `${SUMMARY_TAB_NAME}!A1:D${rows.length}`, rows.map((r) => {
+    const padded = [...r];
+    while (padded.length < 4) padded.push('');
+    return padded as (string | number)[];
+  }));
 }
