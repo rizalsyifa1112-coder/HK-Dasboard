@@ -4,12 +4,12 @@
 // di sini modelnya row-tetap-per-item x kolom-tanggal (1-30/31 = kolom B-AE / B-AF).
 
 const MONTH_NAMES_ID = [
-  'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI',
-  'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER',
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
 ];
 
 /**
- * Nama tab bulanan, contoh: 18 Juli 2026 -> "JULI 2026" (pakai spasi, sesuai tab asli)
+ * Nama tab bulanan, contoh: 18 Juli 2026 -> "Juli 2026" (pakai spasi, sesuai tab asli)
  * Sesuaikan lagi di sini kalau format tab kamu ternyata beda.
  */
 export function getMonthTabName(date: Date): string {
@@ -35,7 +35,7 @@ export function dayToColumnLetter(day: number): string {
 
 /**
  * Bangun referensi sel A1 lengkap untuk sebuah item pada tanggal tertentu.
- * contoh: buildCellRef('APRIL2026', 16, 18) -> "APRIL2026!R16"  (hari ke-18 -> kolom R)
+ * contoh: buildCellRef('April 2026', 16, 18) -> "April 2026!R16"  (hari ke-18 -> kolom R)
  */
 export function buildCellRef(tabName: string, sheetRow: number, day: number): string {
   const col = dayToColumnLetter(day);
