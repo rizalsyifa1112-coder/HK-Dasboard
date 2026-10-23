@@ -1,8 +1,14 @@
 // Service worker minimal untuk HK Manager.
-// Hanya untuk syarat "installable PWA". Tidak ada caching.
-// POST, /api/, dan domain lain (Supabase) langsung ke jaringan.
+// Tujuannya HANYA memenuhi syarat teknis "installable PWA" di Chrome/Android
+// (Chrome mewajibkan ada service worker dengan fetch handler terdaftar
+// sebelum mau menawarkan opsi "Instal aplikasi").
+//
+// SENGAJA tidak melakukan caching apa pun — semua request tetap langsung
+// ke jaringan seperti biasa. Ini penting karena aplikasi ini banyak
+// bergantung pada data real-time (Supabase), jadi kita tidak mau ada
+// data lama/basi ke-cache dan bikin bingung staff/supervisor.
 
-self.addEventListener('install', () => {
+self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
@@ -11,15 +17,6 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-
-  if (
-    event.request.method !== 'GET' ||
-    url.pathname.startsWith('/api/') ||
-    url.origin !== self.location.origin
-  ) {
-    return; // biarkan browser menangani langsung
-  }
-
+  // Network passthrough — tidak ada caching, tidak ada mode offline.
   event.respondWith(fetch(event.request));
 });
